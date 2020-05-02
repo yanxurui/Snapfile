@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+
+    <title>Login</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sjcl/1.0.8/sjcl.min.js" integrity="sha256-nIoG9XIePM1QNttI6KAGLYGNxc4DNinxxmOZW0/Z7uA=" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.0/jquery.min.js" integrity="sha256-xNzN2a4ltkB44Mc/Jz3pT4iU1cmeR0FkXs4pru/JxaQ=" crossorigin="anonymous"></script>
+    <script>
+        $(function() {
+            function sha256(input) {
+                // var myBitArray = sjcl.hash.sha256.hash(input);
+                // return sjcl.codec.hex.fromBits(myBitArray);
+                return input;
+            }
+            $('#login').on('submit', function(e) {
+                var field = $(this).find('input[name="identity"]');
+                var passcode = field.val();
+                field.val(sha256(passcode));
+            });
+            $('#create').on('click', function() {
+                // try up to 5 times
+                var retry = 5;
+
+                // stage 1: generate a random alpha-numeric string
+                // see: https://www.geeksforgeeks.org/generate-random-alpha-numeric-string-in-javascript/
+                var passcode = Math.random().toString(36).substring(2, 8); // length is 6
+
+                // stage 2: generate hash
+                var hashed_passcode = sha256(passcode)
+
+                // stage 3: send request
+                function signup() {
+                    $.ajax('/signup', {
+                        type: "POST",
+                        data: {identity: hashed_passcode},
+                        statusCode: {
+                            200: function () {
+                                console.log('yes');
+                                alert("Please remember your passcode: " + passcode);
+                                // window.location = '/login.html';
+                            },
+                            409: function (jqXHR) {
+                                retry--;
+                                // Conflict
+                                console.log(jqXHR.responseText);
+                                if (retry > 0) {
+                                    signup();
+                                }
+                                else {
+                                    alert(jqXHR.responseText);
+                                }
+                            },
+                            507: function (jqXHR) {
+                                // InsufficientStorage
+                                alert(jqXHR.responseText);
+                            },
+                        }
+                    });
+                }
+                signup();
+            });
+        });
+        
+    </script>
+</head>
+<body>
+    
+    <button id="create" type="button">Create</button>
+    Or
+    <form id="login" action="login" method="POST">
+        <input type="text" name="identity">
+        <input type="submit" value="Open">
+    </form>
+</body>
+</html>
