@@ -102,8 +102,14 @@ class Folder:
         folder_key, _ = cls._keys(identity)
         folder_info_dict = redis.get(folder_key)
         if folder_info_dict:
-            return Folder(**folder_info_dict)
-        return None
+            folder = Folder(**folder_info_dict)
+            if datetime.now() > folder.expire_at:
+                log.info('Folder expired')
+                return None
+            else:
+                return folder
+        else:
+            return None
 
     @staticmethod
     def _path(identity):
@@ -157,14 +163,3 @@ class Folder:
     async def exists(cls, identity):
         folder_key, _ = cls._keys(identity)
         return folder_key in redis
-
-
-def init():
-    if not os.path.isdir(config.UPLOAD_ROOT_DIRECTORY):
-        os.mkdir(config.UPLOAD_ROOT_DIRECTORY)
-        # raise SystemExit('Upload path "%s" does not exist.' % config.UPLOAD_ROOT_DIRECTORY)
-    # for i in range(1, config.UPLOAD_SECOND_DIRECTORY_RANGE):
-    #     second = os.path.join(config.UPLOAD_ROOT_DIRECTORY, str(i))
-    #     if not os.path.isdir(second):
-    #         os.mkdir(second)
-

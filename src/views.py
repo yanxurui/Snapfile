@@ -33,37 +33,43 @@ async def signup(request):
     form_data = await request.post()
     identity = form_data['identity']
     await Folder.signup(identity)
-    return web.Response(text='Folder created!')
+    resp = web.Response(text='Folder created!')
+    await remember(request, resp, identity)
+    return resp
 
-class LoginView(web.View):
-    async def get(self):
-        # redirect to html file
-        raise web.HTTPFound('/login.html')
-
-    async def post(self):
-        request = self.request
-        form_data = await request.post()
-        identity = form_data['identity'] # usually this should be user name & password
-        identity = await auth.authenticate(identity)
-        if identity is None:
-            raise web.HTTPUnauthorized()
-        else:
-            location = request.app.router['index'].url_for()
-            resp = web.HTTPFound(location=location)
-            await remember(request, resp, identity)
-            raise resp
+async def login(request):
+    form_data = await request.post()
+    identity = form_data['identity']
+    # usually this should be user name & password
+    identity = await auth.authenticate(identity)
+    if identity is None:
+        raise web.HTTPUnauthorized()
+    else:
+        location = request.app.router['static'].url_for(filename='/index.html')
+        resp = web.HTTPFound(location=location)
+        await remember(request, resp, identity)
+        raise resp
 
 async def logout(request):
     await check_authorized(request)
-    resp = web.HTTPFound('/login.html')
+    location = request.app.router['static'].url_for(filename='/login.html')
+    resp = web.HTTPFound(location)
     await forget(request, resp)
     raise resp
+
+async def allow(request):
+    """check if a user is logged in
+    for NGINX auth_request directive
+    """
+    await check_authorized(request)
+    return web.Response()
 
 async def login_required(request, throw=True):
     """Check login and return the folder
     """
     identity = await authorized_userid(request)
     if identity is None:
+        log.warning('Wrong identity')
         if throw:
             raise web.HTTPUnauthorized()
         else:
@@ -72,12 +78,18 @@ async def login_required(request, throw=True):
     folder = folders.get(identity)
     if folder is None:
         folder = Folder.fetch(identity)
+        if folder is None:
+            if throw:
+                raise web.HTTPUnauthorized()
+            else:
+                return None
         folders[identity] = folder
     return folder
 
 async def index(request):
-    folder = await login_required(request)
-    raise web.HTTPFound('/index.html')
+    await login_required(request) # redirect to login if needed
+    location = request.app.router['static'].url_for(filename='/index.html')
+    raise web.HTTPFound(location)
 
 async def ws(request):
     ws_current = web.WebSocketResponse()
@@ -86,9 +98,10 @@ async def ws(request):
         raise HTTPBadRequest
     await ws_current.prepare(request) # establish
     # When the client is unauthorized, it does not work by simply raising an HTTPException before or after the handshake
-    # Instead, we call the `close` method after ws is established
+    # Instead, we call the `close` method after ws is established and the client is responsible for redirection
     folder = await login_required(request, throw=False)
     if folder is None:
+        log.info('Close ws connection due to unauthorization')
         await ws_current.close(code=aiohttp.WSCloseCode.Unauthorized, message='you have logged out')
         return ws_current
     name = get_client_display_name(request)
@@ -209,7 +222,7 @@ async def download(request):
     pretty_name = name # todo
     resp = web.Response(headers={
         'Content-Disposition': 'attachment; filename="{0}"'.format(pretty_name),
-        'X-Accel-Redirect': '/protected/{0}/{1}'.format(folder.path, name)
+        'X-Accel-Redirect': '/download/{0}/{1}'.format(folder.path, name)
         })
     return resp
 

@@ -1,4 +1,3 @@
-import aiohttp_security
 from aiohttp_security.abc import AbstractAuthorizationPolicy
 
 from model import Folder
@@ -30,6 +29,4 @@ async def authenticate(passcode):
     else:
         return None
 
-def init(app):
-    policy = aiohttp_security.SessionIdentityPolicy()
-    aiohttp_security.setup(app, policy, SimpleAuthorizationPolicy())
+    

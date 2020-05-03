@@ -11,3 +11,30 @@ an anonymous file transfer application that enables you to access the file from 
 	* each folder has a corresponding path in the server where files uploaded to this folder are stored
 	* uploading is handled directly in Python
 * download: files are served by NGINX using `X-accel`
+
+
+
+## Deploy
+For CentOS
+
+run as yxr
+```
+clone project to /home/yxr/CloudUDisk/
+```
+
+run as root
+```
+ln -sf /home/yxr/CloudUDisk/nginx.conf /etc/nginx/
+mkdir -p /var/www/clouddisk/
+
+<!--
+ln -s /home/yxr/CloudUDisk/src/static /var/www/clouddisk/static
+does not work
+403 due to permission issue
+namei -om /var/www/clouddisk/static
+-->
+
+cp -r /home/yxr/CloudUDisk/src/static /var/www/clouddisk/static
+mkdir /var/www/clouddisk/files
+```
+

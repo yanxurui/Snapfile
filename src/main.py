@@ -6,10 +6,10 @@ logging.basicConfig(
 
 from aiohttp import web
 from aiohttp_session import SimpleCookieStorage, session_middleware
+import aiohttp_security
 
-import auth
-import model
-from views import signup, LoginView, logout, index, ws, upload, download
+from auth import SimpleAuthorizationPolicy
+from views import signup, login, logout, allow, index, ws, upload, download
 
 
 log = logging.getLogger(__name__)
@@ -25,19 +25,20 @@ def init_app():
 
     app.on_shutdown.append(shutdown)
 
+    policy = aiohttp_security.SessionIdentityPolicy()
+    aiohttp_security.setup(app, policy, SimpleAuthorizationPolicy())
+
     app.add_routes([
         web.get('/ws', ws),
         web.post('/signup', signup),
-        web.view('/login', LoginView, name='login'),
+        web.post('/login', login, name='login'),
         web.post('/logout', logout),
+        web.get('/auth', allow),
         web.post('/files', upload),
         web.get('/files/{name}', download),
         # below are static files that should be served by NGINX
-        web.get('/', index, name='index'), # static does not support /index.html when access /
-        web.static('/', './templates')]) # handle static files such as html, js, css
-
-    auth.init(app)
-    model.init()
+        web.get('/', index), # static does not support redirect / to /index.html
+        web.static('/', './static', name='static')]) # handle static files such as html, js, css
     
     return app
 

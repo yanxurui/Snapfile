@@ -99,7 +99,7 @@ $(function() {
             else if (e.code == 4000)
             {
                 // Unauthorized (customized)
-                window.location = '/login.html';
+                window.location = 'login.html';
             }
         };
         conn.onerror = function(e) {
