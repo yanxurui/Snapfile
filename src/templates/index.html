@@ -3,190 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
-
+    <link rel="stylesheet" type="text/css" href="main.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.0/jquery.min.js" integrity="sha256-xNzN2a4ltkB44Mc/Jz3pT4iU1cmeR0FkXs4pru/JxaQ=" crossorigin="anonymous"></script>
-    <script language="javascript" type="text/javascript">
-        $(function() {
-            // // heartbeat
-            // var lost = 0;
-            // var refreshIntervalId = setInterval(ping, 2000);
-            // function ping()
-            // {
-            //   var jqxhr = $.ajax({
-            //     url: '/ping',
-            //     type: 'GET',
-            //     timeout: 1000,
-            //   })
-            //   .done(function(data) {
-            //     log('alive:' + data);
-            //     lost = 0;
-            //   })
-            //   .fail(function() {
-            //     log('lost');
-            //     lost++;
-            //     if (lost >= 10)
-            //     {
-            //       clearInterval(refreshIntervalId);
-            //       log('dead');
-            //     }
-            //   })
-            // }
-
-            var conn = null; // websocket
-            var name = "UNKNOWN";
-            var err_acc = 0;
-            var msg_count = 0;
-
-            function log(msg) {
-                var control = $('#log');
-                var date = new Date();
-                var date_prompt = '(' + date.toISOString().split('T')[1].slice(0, 8) + ') ';
-                control.html(control.html() + date_prompt + msg + '<br/>');
-                control.scrollTop(control.scrollTop() + 1000);
-            }
-
-            function connect() {
-                disconnect();
-                var wsUri = (window.location.protocol == 'https:' && 'wss://' || 'ws://') + window.location.host + '/ws';
-                conn = new WebSocket(wsUri);
-                //log('Connecting...');
-                conn.onopen = function() {
-                    log('Connected.');
-                    update_ui();
-                    err_acc = 0;
-                    conn.send(JSON.stringify({
-                        action: 'sync',
-                        offset: msg_count
-                    }))
-                };
-                conn.onmessage = function(e) {
-                    var data = JSON.parse(e.data);
-                    switch (data.action) {
-                        case 'connect':
-                            name = data.name;
-                            log('Connected as ' + name);
-                            update_ui();
-                            break;
-                        case 'disconnect':
-                            name = data.name;
-                            log('Disconnected ' + name);
-                            update_ui();
-                            break;
-                        case 'join':
-                            log('Joined ' + data.name);
-                            break;
-                        case 'send':
-                            data.msgs.forEach(msg => log(msg.sender + ': ' + msg.data));
-                            msg_count += data.msgs.length;
-                            break;
-                    }
-                };
-                conn.onclose = function(e) {
-                    log('Disconnected');
-                    conn = null;
-                    update_ui();
-                    console.log('Websocket closed because: ' + e.reason);
-                    if (e.code == 1006)
-                    {
-                        // Abnormal Closure
-                        // when safari is not in focus
-                        // ios safari will drop websocket connection due to inactivity
-                        // and delay any timer until safari comes back to foreground
-                        console.log('re-connect automatically');
-                        t = 1000 * Math.pow(2, err_acc);
-                        if (t < 60 * 1000)
-                        {
-                            setTimeout(connect, t);
-                        }
-                    }
-                    else if (e.code == 4000)
-                    {
-                        // Unauthorized (customized)
-                        window.location = '/login.html';
-                    }
-                };
-                conn.onerror = function(e) {
-                    log('Error: ' + JSON.stringify(e));
-                    err_acc ++;
-                    // conn.close();
-                    // conn = null;
-                    // update_ui();
-                };
-
-            }
-
-            function disconnect() {
-                if (conn != null) {
-                    //log('Disconnecting...');
-                    conn.close();
-                    conn = null;
-                    name = 'UNKNOWN';
-                    update_ui();
-                }
-            }
-
-            function update_ui() {
-                if (conn == null) {
-                    $('#status').text('disconnected');
-                    $('#send').prop("disabled", true);
-                } else {
-                    $('#status').text('connected');
-                    $('#send').prop("disabled", false);
-                }
-                $('#name').text(name);
-            }
-            $('#logout').on('click', function() {
-                disconnect();
-                // $.post('/logout'); // does not redirect
-                // see: https://stackoverflow.com/q/8389646/6088837
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.action = '/logout';
-                document.body.appendChild(form);
-                form.submit();
-                return false;
-            });
-            $('#send').on('click', function() {
-                var text = $('#text').val();
-                // log(text); // sever echos this msg
-                conn.send(JSON.stringify({
-                    action: 'send',
-                    data: text
-                }));
-                $('#text').val('').focus();
-                return false;
-            });
-            $('#text').on('keyup', function(e) {
-                if (e.keyCode === 13) {
-                    $('#send').click();
-                    return false;
-                }
-            });
-            connect(); // connect immediately
-        });
-    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.form/4.2.2/jquery.form.min.js" integrity="sha256-2Pjr1OlpZMY6qesJM68t2v39t+lMLvxwpa8QlRjJroA=" crossorigin="anonymous"></script>
+    <script type="text/javascript" src="main.js"></script>
 </head>
 
 <body>
-    <h3>Chat!</h3>
-    <div>
-        <button id="logout">Logout</button>&nbsp;|&nbsp;Status:
-        <span id="name">UNKNOWN</span>
-        <span id="status">disconnected</span>
-    </div>
-    <div id="log" style="width:20em;height:15em;overflow:auto;border:1px solid black">
-    </div>
-    <form id="chatform" onsubmit="return false;">
-        <input id="text" type="text" />
-        <input id="send" type="button" value="Send" disabled/>
-    </form>
+    <div id="container">
+        <div id="top">
+            <p id="status_bar">
+                <span>expires at: {expire_at}</span>
+                <span>storage: {usage_percentage} of {storage_limit} used</span>
+                <!-- <span id="name">I am using {name}</span> -->
+                <input id="logout" type="button" value="Logout">
+            </p>
+        </div>
+        <div id="middle">
+            <table></table>
+        </div>
+        <div id="bottom">
+            <textarea id="text" rows="4" placeholder="type here to write message or drag&drop to add files"></textarea>
+            <input type="button" class="left" id="upload_files" value="Upload files" />
+            <span class="percent"></span>
+            <input type="button" class="right" id="send_message" value="Send message" disabled>
 
-    <form action="/files" method="post" accept-charset="utf-8" enctype="multipart/form-data">
-        <label for="file">Files</label>
-        <input id="file" name="file" type="file" value=""/>
-        <input type="submit" value="upload"/>
-    </form>
-
+            <!-- In order to change the display text of the input,
+                a separate button is created to capture the click and forward to the real file input below which is invisible -->
+            <form id="file" action="/files" method="post" accept-charset="utf-8" enctype="multipart/form-data">
+                <input name="myfile[]" type="file" value="Upload Files" multiple/>
+            </form>
+        </div>
+    </div>
 </body>
 
 </html>

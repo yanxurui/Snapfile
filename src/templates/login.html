@@ -5,6 +5,56 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
 
     <title>Login</title>
+    <style type="text/css">
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        /* style the container */
+        .container {
+            position: relative;
+            border-radius: 5px;
+            background-color: #f2f2f2;
+            padding: 20px 0 30px 0;
+        } 
+
+        /* style inputs and link buttons */
+        input {
+            /*clear ios weird style*/
+            -webkit-appearance: none;
+            width: 100%;
+            max-width: 600px;
+            padding: 12px;
+            border: none;
+            border-radius: 4px;
+            margin: 5px 0;
+            opacity: 0.85;
+            font-size: 20px;
+        }
+
+        input:hover {
+            opacity: 1;
+        }
+
+        input[type=submit] {
+            background-color: green;
+            color: white;
+        }
+
+        input[type=button] {
+            background-color: red;
+            color: white;
+        }
+
+        .row {
+            text-align: center;
+        }
+
+    </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sjcl/1.0.8/sjcl.min.js" integrity="sha256-nIoG9XIePM1QNttI6KAGLYGNxc4DNinxxmOZW0/Z7uA=" crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.0/jquery.min.js" integrity="sha256-xNzN2a4ltkB44Mc/Jz3pT4iU1cmeR0FkXs4pru/JxaQ=" crossorigin="anonymous"></script>
     <script>
@@ -66,12 +116,20 @@
     </script>
 </head>
 <body>
-    
-    <button id="create" type="button">Create</button>
-    Or
-    <form id="login" action="login" method="POST">
-        <input type="text" name="identity">
-        <input type="submit" value="Open">
-    </form>
+<div class="container">
+    <div class="row">
+        <h1>Snapfile</h1>
+        <h2>An anonymous file transfer application that enables you to access files from any device without an account</h2>
+        
+        <form id="login" action="login" method="post">
+            <div><input type="password" name="identity" placeholder="Please input your passcode" required></div>
+            <div><input type="submit" value="Open Your Folder"></div>
+        </form>
+
+        <p>Or</p>
+
+        <input id="create" type="button" class="google btn" value="Create A New Folder">
+    </div>
+</div>
 </body>
 </html>
