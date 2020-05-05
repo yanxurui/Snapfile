@@ -26,6 +26,7 @@ run as root
 ```
 ln -sf /home/yxr/CloudUDisk/nginx.conf /etc/nginx/
 mkdir -p /var/www/clouddisk/
+chown -R yxr /var/www/clouddisk/
 
 <!--
 ln -s /home/yxr/CloudUDisk/src/static /var/www/clouddisk/static
@@ -34,7 +35,7 @@ does not work
 namei -om /var/www/clouddisk/static
 -->
 
-cp -r /home/yxr/CloudUDisk/src/static /var/www/clouddisk/static
+cp -r /home/yxr/CloudUDisk/src/static /var/www/clouddisk/
 mkdir /var/www/clouddisk/files
 ```
 

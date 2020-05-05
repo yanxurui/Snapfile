@@ -9,18 +9,18 @@ import asyncio
 import aiohttp
 import aiohttp_jinja2
 from aiohttp import web, WSCloseCode
+WSCloseCode.Unauthorized = 4000 # Add a customized close code
 from aiohttp_security import (
     remember, forget, authorized_userid,
     check_permission, check_authorized,
 )
 from user_agents import parse
 
+import config
 import auth
-import model
-from model import Message, Folder
+from model import Message, MsgType, Folder
 
 log = logging.getLogger(__name__)
-WSCloseCode.Unauthorized = 4000 # Add a customized close code
 
 
 def get_client_display_name(request):
@@ -64,50 +64,53 @@ async def allow(request):
     await check_authorized(request)
     return web.Response()
 
-async def login_required(request, throw=True):
+async def login_required(request):
     """Check login and return the folder
     """
     identity = await authorized_userid(request)
     if identity is None:
         log.warning('Wrong identity')
-        if throw:
-            raise web.HTTPUnauthorized()
-        else:
-            return None
+        raise web.HTTPUnauthorized()
     folders = request.app['folders']
-    folder = folders.get(identity)
-    if folder is None:
-        folder = Folder.fetch(identity)
+    if identity in folders:
+        return folders[identity]
+    else:
+        folder = await Folder.fetch(identity)
         if folder is None:
-            if throw:
-                raise web.HTTPUnauthorized()
-            else:
-                return None
-        folders[identity] = folder
-    return folder
+            log.error('Why do we get here?')
+            raise web.HTTPUnauthorized()
+        connections = set()
+        folders[identity] = (folder, connections)
+        return folder, connections
 
 async def index(request):
-    await login_required(request) # redirect to login if needed
-    location = request.app.router['static'].url_for(filename='/index.html')
-    raise web.HTTPFound(location)
+    try:
+        await check_authorized(request)
+    except web.HTTPUnauthorized:
+        location = request.app.router['static'].url_for(filename='/login.html')
+        raise web.HTTPFound(location)
+    directory = request.app.router['static'].get_info()['directory']
+    log.info('directory: %s' % directory)
+    location = os.path.join(directory, 'index.html')
+    return web.FileResponse(path=location)
 
 async def ws(request):
     ws_current = web.WebSocketResponse()
     ws_ready = ws_current.can_prepare(request)
     if not ws_ready.ok:
-        raise HTTPBadRequest
+        raise web.HTTPBadRequest
     await ws_current.prepare(request) # establish
     # When the client is unauthorized, it does not work by simply raising an HTTPException before or after the handshake
     # Instead, we call the `close` method after ws is established and the client is responsible for redirection
-    folder = await login_required(request, throw=False)
-    if folder is None:
+    try:
+        folder, connections = await login_required(request)
+    except web.HTTPUnauthorized:
         log.info('Close ws connection due to unauthorization')
-        await ws_current.close(code=aiohttp.WSCloseCode.Unauthorized, message='you have logged out')
+        await ws_current.close(code=aiohttp.WSCloseCode.Unauthorized, message='You may have logged out')
         return ws_current
-    name = get_client_display_name(request)
-    ws_current['name'] = name
-    folder.connections.add(ws_current)
+    connections.add(ws_current)
 
+    name = get_client_display_name(request)
     info = folder.format_for_view()
     info['name'] = name
     await ws_current.send_json({
@@ -122,7 +125,7 @@ async def ws(request):
             if ws_current.closed:
                 # client such as chrome will gracefully close the connection by calling ws.close()
                 # but other browsers such as safari will not notify the server
-                folder.connections.remove(ws_current)
+                connections.remove(ws_current)
                 log.info('%s disconnected.', name)
                 break
             elif ws_msg.type == aiohttp.WSMsgType.TEXT:
@@ -130,14 +133,13 @@ async def ws(request):
                 a = ws_data['action']
                 if a == 'send':
                     msg = Message(
-                        type=model.MsgType.TEXT,
-                        date=datetime.now(),
+                        type=MsgType.TEXT,
                         data=ws_data['data'],
                         size=len(ws_data['data']),
                         sender=name
                     )
                     await folder.save(msg)
-                    for ws in folder.connections:
+                    for ws in connections:
                         if ws.closed:
                             log.warning('%s disconnected but not aware.', ws['name'])
                         else:
@@ -158,7 +160,7 @@ async def ws(request):
         
         except Exception as e:
             if isinstance(e, asyncio.CancelledError):
-                folder.connections.remove(ws_current)
+                connections.remove(ws_current)
                 # this occurs when the user leaves this page
                 log.info('CancelledError detected for %s.', name)
             raise # throw whatever captured here
@@ -167,7 +169,7 @@ async def ws(request):
 
 
 async def upload(request):
-    folder = await login_required(request)
+    folder, connections = await login_required(request)
     name = get_client_display_name(request)
     reader = await request.multipart()
     count = 0
@@ -183,28 +185,32 @@ async def upload(request):
             # no file is selected
             continue
         size = 0 # You cannot rely on Content-Length if transfer is chunked.
-        with open(os.path.join(folder.path, filename), 'wb') as f:
+        file_id = await folder.gen_file_id()
+
+        log.debug('start uploading %s' % filename)
+        with open(os.path.join(config.UPLOAD_ROOT_DIRECTORY, folder.get_file_path(file_id)), 'wb') as f:
             while True:
                 chunk = await field.read_chunk(1024*1024)  # 8192 bytes by default.
                 if not chunk:
                     # todo: What else could cause this besides reaching the end?
                     break
                 size += len(chunk)
-                # log.debug('writing %s ...' % filename)
+                log.debug('writing {} for {} ...'.format(len(chunk), filename))
                 f.write(chunk) # block op
-        log.debug('writing %s done' % filename)
 
         # should be in a function
         msg = Message(
-            type=model.MsgType.FILE,
-            date=datetime.now(),
+            type=MsgType.FILE,
             data=filename,
             size=size, # todo
-            sender=name
+            sender=name,
+            file_id=file_id,
         )
         await folder.save(msg)
+        log.debug('uploading %s done' % filename)
+
         count += 1
-        for ws in folder.connections:
+        for ws in connections:
             if ws.closed:
                 log.warning('%s disconnected but not aware.', ws['name'])
             else:
@@ -217,12 +223,13 @@ async def upload(request):
 
 
 async def download(request):
-    folder = await login_required(request)
-    name = request.match_info['name']
-    pretty_name = name # todo
+    folder, _ = await login_required(request)
+    file_id = request.match_info['file_id']
+    pretty_name = request.query['name'] # we can not query the filename by file id in server side
+    log.info(folder.get_file_path(file_id))
     resp = web.Response(headers={
         'Content-Disposition': 'attachment; filename="{0}"'.format(pretty_name),
-        'X-Accel-Redirect': '/download/{0}/{1}'.format(folder.path, name)
+        'X-Accel-Redirect': '/download/{}'.format(folder.get_file_path(file_id))
         })
     return resp
 

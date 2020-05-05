@@ -23,13 +23,23 @@ function () {
 
     return str;
 };
-
+// convert date to month-day Hour:Minute
+function formatDate(date) {
+  var hours = date.getHours();
+  var minutes = date.getMinutes();
+  hours = hours < 10 ? '0'+hours : hours;
+  minutes = minutes < 10 ? '0'+minutes : minutes;
+  return (date.getMonth()+1) + "-" + date.getDate() + " " + hours + ":" + minutes;
+}
 
 $(function() {
     // =====BEGIN=====Messaging
     var conn = null; // websocket
+    var connected = false;
     var err_acc = 0;
     var msg_count = 0;
+    var textarea = $('textarea');
+    var send = $('input#send_message');
 
     // display a single message
     function display(msg) {
@@ -41,12 +51,13 @@ $(function() {
         }
         else if (msg.type == 1) {
             //  FILE
+            var a = $('<a target="_blank">').attr('href', '/files/' + msg.file_id + '?name=' + msg.data).text(msg.data);
             tr.append(
-                $('<td>').text(msg.data),
+                $('<td>').append(a),
                 $('<td class="right">').text(msg.size),
             );
         }
-        tr.append($('<td>').text(msg.date));
+        tr.append($('<td>').text(formatDate(new Date(msg.date))));
         $('table').append(tr);
     }
 
@@ -56,16 +67,19 @@ $(function() {
         conn = new WebSocket(wsUri);
         conn.onopen = function() {
             console.log('Connected.');
-            update_ui();
+            connected = true;
             err_acc = 0;
         };
         conn.onmessage = function(e) {
             var data = JSON.parse(e.data);
+            console.log('receive');
             switch (data.action) {
                 case 'connect':
                     var info = data.info;
+                    // new Date from isoformat
+                    // format to m-d HH:MM
+                    info.expire_at = formatDate(new Date(info.expire_at));
                     update_status(info);
-                    update_ui();
                     conn.send(JSON.stringify({
                         action: 'pull',
                         offset: msg_count
@@ -79,10 +93,10 @@ $(function() {
             }
         };
         conn.onclose = function(e) {
-            console.log('Disconnected');
             conn = null;
-            update_ui();
-            console.log('Websocket closed because: ' + e.reason);
+            connected = false;
+            send.prop("disabled", true);
+            console.log('Websocket closed because: (' + e.code + ') ' + e.reason);
             if (e.code == 1006)
             {
                 // Abnormal Closure
@@ -105,19 +119,15 @@ $(function() {
         conn.onerror = function(e) {
             console.log('Error: ' + JSON.stringify(e));
             err_acc ++;
-            // conn.close();
-            // conn = null;
-            // update_ui();
+            // conn.close(); will be called
         };
 
     }
 
     function disconnect() {
-        if (conn != null) {
+        if (connected) {
             //log('Disconnecting...');
             conn.close();
-            conn = null;
-            update_ui();
         }
     }
 
@@ -140,38 +150,26 @@ $(function() {
         });
     }
 
-    function update_ui() {
-        if (conn == null) {
-            $('#status').text('disconnected');
-            $('#send').prop("disabled", true);
-        } else {
-            $('#status').text('connected');
-            $('#send').prop("disabled", false);
-        }
-    }
-
-    // send when press enter
     // disable the submit button when the textarea is empty
-    var textarea = $('textarea');
-    var submit = $('input#send_message');
     textarea.keyup(function(e) {
-        if($(this).val().length > 0) {
-            submit.prop("disabled", false); 
+        if($(this).val().length > 0 && connected) {
+            send.prop("disabled", false); 
         } else { 
-            submit.prop("disabled", true);
+            send.prop("disabled", true);
         }
     });
 
-    submit.on('click', function() {
+    send.on('click', function() {
         var text = textarea.val();
         if (text) {
+            console.log('send');
             conn.send(JSON.stringify({
                 action: 'send',
                 data: text
             }));
             textarea.val('');
             // textarea.focus(); bad UE on mobile
-            submit.prop("disabled", true);
+            send.prop("disabled", true);
         }
         return false;
     });
@@ -183,28 +181,37 @@ $(function() {
 
     // =====BEGIN=====Upload files
     var file_input = $('form#file input');
+    var upload_btn = $("input#upload_files");
     var percent = $('.percent');
     var options = {
-        beforeSend: function() {
+        beforeSend: function(jqXHR) {
             percent.text('0%');
+            console.log('----');
+            // upload_btn.val('Cancel');
+            // upload_btn.click(function() {
+            //     jqXHR.abort();
+            // });
         },
         uploadProgress: function(event, position, total, percentComplete) {
             percent.text(percentComplete + '%');
         },
         complete: function(xhr, textStatus) {
+            console.log('++++');
             // success or error
-            percent.text(xhr.responseText);
+            percent.text(textStatus + ': ' + xhr.responseText);
         }
     };
     // forward the click event
-    $("input#upload_files").click(function () {
+    upload_btn.click(function () {
+        console.log('click upload_btn');
         file_input.trigger('click');
     });
     // listen on select file
     file_input.on('change', function(){
         if (this.value) {
             // submit when the field is not empty
-            $("form#file").ajaxSubmit(options);
+            // i.e., uploading immediately after selecting file(s)
+            var form = $("form#file").ajaxSubmit(options);
         }
     });
     // ======END======
