@@ -25,11 +25,11 @@ function () {
 };
 // convert date to month-day Hour:Minute
 function formatDate(date) {
-  var hours = date.getHours();
-  var minutes = date.getMinutes();
-  hours = hours < 10 ? '0'+hours : hours;
-  minutes = minutes < 10 ? '0'+minutes : minutes;
-  return (date.getMonth()+1) + "-" + date.getDate() + " " + hours + ":" + minutes;
+    var hours = date.getHours();
+    var minutes = date.getMinutes();
+    hours = hours < 10 ? '0'+hours : hours;
+    minutes = minutes < 10 ? '0'+minutes : minutes;
+    return (date.getMonth()+1) + "-" + date.getDate() + " " + hours + ":" + minutes;
 }
 
 $(function() {
@@ -179,17 +179,11 @@ $(function() {
     var options = {
         beforeSend: function(jqXHR) {
             percent.text('0%');
-            console.log('----');
-            // upload_btn.val('Cancel');
-            // upload_btn.click(function() {
-            //     jqXHR.abort();
-            // });
         },
         uploadProgress: function(event, position, total, percentComplete) {
             percent.text(percentComplete + '%');
         },
         complete: function(xhr, textStatus) {
-            console.log('++++');
             // success or error
             percent.text(textStatus + ': ' + xhr.responseText);
         }
@@ -205,6 +199,8 @@ $(function() {
             // submit when the field is not empty
             // i.e., uploading immediately after selecting file(s)
             var form = $("form#file").ajaxSubmit(options);
+            // checkout https://stackoverflow.com/questions/12030686/html-input-file-selection-event-not-firing-upon-selecting-the-same-file
+            this.value = null;
         }
     });
     // ======END======
