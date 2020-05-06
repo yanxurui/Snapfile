@@ -219,7 +219,7 @@ async def upload(request):
                     'msgs': [msg.format_for_view()]
                 })
 
-    return web.Response(text='{} file(s) successfully uploaded'.format(count))
+    return web.Response(text='{} file(s) uploaded'.format(count))
 
 
 async def download(request):

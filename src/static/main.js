@@ -176,12 +176,26 @@ $(function() {
     var file_input = $('form#file input');
     var upload_btn = $("input#upload_files");
     var percent = $('.percent');
+    var lastPosition = 0;
+    var lastTime = Date.now(); // current time in milliseconds
     var options = {
         beforeSend: function(jqXHR) {
             percent.text('0%');
         },
         uploadProgress: function(event, position, total, percentComplete) {
-            percent.text(percentComplete + '%');
+            var time = Date.now();
+            var timeDelta = (time - lastTime) / 1000;
+            if (timeDelta > 0.5 || total == 100) {
+                var speed = ((position - lastPosition) / 1000) / timeDelta;
+                if (speed > 1000) {
+                    speed = (speed / 1000).toFixed(1) + 'M';
+                } else {
+                    speed = speed.toFixed(1) + 'K';
+                }
+                percent.text(percentComplete + '% ' + speed + 'B/s');
+                lastPosition = position;
+                lastTime = time;
+            }
         },
         complete: function(xhr, textStatus) {
             // success or error
