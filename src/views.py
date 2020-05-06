@@ -45,10 +45,10 @@ async def login(request):
     if identity is None:
         raise web.HTTPUnauthorized()
     else:
-        location = request.app.router['static'].url_for(filename='/index.html')
-        resp = web.HTTPFound(location=location)
+        # ajax has trouble handling redirecting if 302 is returned
+        resp = web.Response()
         await remember(request, resp, identity)
-        raise resp
+        return resp
 
 async def logout(request):
     await check_authorized(request)
