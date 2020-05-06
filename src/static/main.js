@@ -66,9 +66,10 @@ $(function() {
         var wsUri = (window.location.protocol == 'https:' && 'wss://' || 'ws://') + window.location.host + '/ws';
         conn = new WebSocket(wsUri);
         conn.onopen = function() {
-            console.log('Connected.');
             connected = true;
             err_acc = 0;
+            send.prop("disabled", false);
+            console.log('Connected.');
         };
         conn.onmessage = function(e) {
             var data = JSON.parse(e.data);
@@ -150,15 +151,6 @@ $(function() {
         });
     }
 
-    // disable the submit button when the textarea is empty
-    textarea.keyup(function(e) {
-        if($(this).val().length > 0 && connected) {
-            send.prop("disabled", false); 
-        } else { 
-            send.prop("disabled", true);
-        }
-    });
-
     send.on('click', function() {
         var text = textarea.val();
         if (text) {
@@ -168,8 +160,9 @@ $(function() {
                 data: text
             }));
             textarea.val('');
-            // textarea.focus(); bad UE on mobile
-            send.prop("disabled", true);
+            if( ! /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ) {
+                textarea.focus(); // bad UE on mobile
+            }
         }
         return false;
     });
