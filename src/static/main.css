@@ -29,6 +29,18 @@ html, body {margin: 0; height: 100%; overflow: hidden}
     flex: 0 1 auto;
 }
 
+.inputAddon {
+    display: flex;
+    align-items: baseline;
+    flex-flow: row nowrap;
+}
+.inputAddon span {
+    flex: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
 /*2. table displaying messages*/
 table {
     width: 100%;

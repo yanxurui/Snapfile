@@ -24,10 +24,12 @@
             <table></table>
         </div>
         <div id="bottom">
-            <textarea id="text" rows="4" placeholder="type here to write message or drag&drop to add files"></textarea>
-            <input type="button" class="left" id="upload_files" value="Upload files" />
-            <span class="percent"></span>
-            <input type="button" class="right" id="send_message" value="Send message" disabled>
+            <textarea id="text" rows="3" placeholder="type here to write message or drag&drop to add files"></textarea>
+            <div class="inputAddon">
+                <input type="button" class="left" id="upload_files" value="Upload files" />
+                <span class="percent"></span>
+                <input type="button" class="right" id="send_message" value="Send message" disabled>
+            </div>
 
             <!-- In order to change the display text of the input,
                 a separate button is created to capture the click and forward to the real file input below which is invisible -->

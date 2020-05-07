@@ -64,21 +64,22 @@
                 return input;
             }
             $('#login').on('submit', function(e) {
-                var field = $(this).find('input[name="identity"]');
-                var passcode = field.val();
-                $.ajax({
-                    type: 'POST',
-                    url: '/login',
-                    data: { identity: sha256(passcode)},
-                    statusCode: {
-                        200: function () {
-                            window.location = '/';
-                        },
-                        401: function () {
-                            alert('Wrong passcode!');
+                var passcode = $(this).find('input[name="identity"]').val();
+                if (passcode) {
+                    $.ajax({
+                        type: 'POST',
+                        url: '/login',
+                        data: { identity: sha256(passcode)},
+                        statusCode: {
+                            200: function () {
+                                window.location = '/';
+                            },
+                            401: function () {
+                                alert('Wrong passcode!');
+                            }
                         }
-                    }
-                });
+                    });
+                }
                 return false;
             });
             $('#create').on('click', function() {
