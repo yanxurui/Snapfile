@@ -14,6 +14,12 @@ an anonymous file transfer application that enables you to access the file from 
 
 
 
+## Test
+```bash
+cd tests
+python -m unittest
+```
+
 ## Deploy
 For CentOS
 
@@ -35,7 +41,7 @@ does not work
 namei -om /var/www/clouddisk/static
 -->
 
-cp -r /home/yxr/CloudUDisk/src/static /var/www/clouddisk/
+/bin/cp -r /home/yxr/CloudUDisk/src/static /var/www/clouddisk/
 mkdir /var/www/clouddisk/files
 ```
 

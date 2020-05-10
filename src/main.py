@@ -1,8 +1,10 @@
 import logging
+import config
 # This function does nothing if the root logger already has handlers configured.
 logging.basicConfig(
-        format='%(asctime)s %(levelname)s %(name)s %(filename)s:%(lineno)d {%(message)s}',
-        level=logging.DEBUG)
+    filename = config.LOG_FILE,
+    level = config.LOG_LEVEL,
+    format='%(asctime)s %(levelname)s %(name)s %(filename)s:%(lineno)d {%(message)s}')
 
 from aiohttp import web
 from aiohttp_session import SimpleCookieStorage, session_middleware
@@ -57,7 +59,7 @@ def main():
     except SystemExit as e:
         log.exception('Failed to start!!')
         # raise
-    web.run_app(app)
+    web.run_app(app, port=config.PORT)
 
 
 if __name__ == '__main__':

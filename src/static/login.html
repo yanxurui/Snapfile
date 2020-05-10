@@ -99,7 +99,7 @@
                         type: "POST",
                         data: {identity: hashed_passcode},
                         statusCode: {
-                            200: function () {
+                            201: function () {
                                 alert("Please save your passcode: " + passcode);
                                 window.location = '/';
                             },

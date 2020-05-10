@@ -24,6 +24,8 @@ log = logging.getLogger(__name__)
 
 
 def get_client_display_name(request):
+    if 'User-Agent' not in request.headers:
+        return 'Unknown'
     user_agent = parse(request.headers['User-Agent'])
     return '{}/{}'.format(
         user_agent.os.family,
@@ -33,7 +35,7 @@ async def signup(request):
     form_data = await request.post()
     identity = form_data['identity']
     await Folder.signup(identity)
-    resp = web.Response(text='Folder created!')
+    resp = web.Response(status=201, text='Folder created!')
     await remember(request, resp, identity)
     return resp
 

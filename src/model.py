@@ -30,9 +30,6 @@ async def startup(app):
     redis = await aioredis.create_redis_pool(config.REDIS_ADDRESS, db=db)
     if not config.PROD:
         await redis.flushdb()
-    log.info('Redis ready')
-
-    if not config.PROD:
         shutil.rmtree(config.UPLOAD_ROOT_DIRECTORY, ignore_errors=True)
     if not os.path.isdir(config.UPLOAD_ROOT_DIRECTORY):
         os.mkdir(config.UPLOAD_ROOT_DIRECTORY)

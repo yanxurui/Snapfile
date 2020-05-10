@@ -190,7 +190,7 @@ $(function() {
                 if (speed > 1000) {
                     speed = (speed / 1000).toFixed(1) + 'M';
                 } else {
-                    speed = speed.toFixed(1) + 'K';
+                    speed = speed.toFixed() + 'K';
                 }
                 percent.text(percentComplete + '% ' + speed + 'B/s');
                 lastPosition = position;
