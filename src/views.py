@@ -10,10 +10,7 @@ import aiohttp
 import aiohttp_jinja2
 from aiohttp import web, WSCloseCode
 WSCloseCode.Unauthorized = 4000 # Add a customized close code
-from aiohttp_security import (
-    remember, forget, authorized_userid,
-    check_permission, check_authorized,
-)
+from aiohttp_security import remember, forget, authorized_userid
 from user_agents import parse
 
 import config
@@ -31,63 +28,55 @@ def get_client_display_name(request):
         user_agent.os.family,
         user_agent.browser.family)
 
+
+async def login_required(request):
+    """authorize and return the (folder, connections)
+    """
+    identity = await authorized_userid(request) # retrieve user id from cookies
+    return await auth.check_login(request.app['folders'], identity)
+
+
 async def signup(request):
     form_data = await request.post()
     identity = form_data['identity']
-    await Folder.signup(identity)
+    age = form_data.get('age')
+    await Folder.create(identity, age)
+    identity = await auth.login(request.app['folders'], identity)
     resp = web.Response(status=201, text='Folder created!')
     await remember(request, resp, identity)
     return resp
+
 
 async def login(request):
     form_data = await request.post()
     identity = form_data['identity']
     # usually this should be user name & password
-    identity = await auth.authenticate(identity)
-    if identity is None:
-        raise web.HTTPUnauthorized()
-    else:
-        # ajax has trouble handling redirecting if 302 is returned
-        resp = web.Response()
-        await remember(request, resp, identity)
-        return resp
+    identity = await auth.login(request.app['folders'], identity)
+    # ajax has trouble handling redirecting if 302 is returned
+    resp = web.Response()
+    await remember(request, resp, identity)
+    return resp
+
 
 async def logout(request):
-    await check_authorized(request)
+    await login_required(request)
     location = request.app.router['static'].url_for(filename='/login.html')
     resp = web.HTTPFound(location)
     await forget(request, resp)
     raise resp
 
+
 async def allow(request):
     """check if a user is logged in
     for NGINX auth_request directive
     """
-    await check_authorized(request)
+    await login_required(request)
     return web.Response()
 
-async def login_required(request):
-    """Check login and return the folder
-    """
-    identity = await authorized_userid(request)
-    if identity is None:
-        log.warning('Wrong identity')
-        raise web.HTTPUnauthorized()
-    folders = request.app['folders']
-    if identity in folders:
-        return folders[identity]
-    else:
-        folder = await Folder.fetch(identity)
-        if folder is None:
-            log.error('Why do we get here?')
-            raise web.HTTPUnauthorized()
-        connections = set()
-        folders[identity] = (folder, connections)
-        return folder, connections
 
 async def index(request):
     try:
-        await check_authorized(request)
+        await login_required(request)
     except web.HTTPUnauthorized:
         location = request.app.router['static'].url_for(filename='/login.html')
         raise web.HTTPFound(location)
@@ -96,11 +85,12 @@ async def index(request):
     location = os.path.join(directory, 'index.html')
     return web.FileResponse(path=location)
 
+
 async def ws(request):
     ws_current = web.WebSocketResponse()
     ws_ready = ws_current.can_prepare(request)
     if not ws_ready.ok:
-        raise web.HTTPBadRequest
+        raise web.HTTPBadRequest()
     await ws_current.prepare(request) # establish
     # When the client is unauthorized, it does not work by simply raising an HTTPException before or after the handshake
     # Instead, we call the `close` method after ws is established and the client is responsible for redirection
@@ -188,7 +178,10 @@ async def upload(request):
             continue
         size = 0 # You cannot rely on Content-Length if transfer is chunked.
         file_id = await folder.gen_file_id()
-
+        l = int(request.headers['Content-Length'])
+        if l + folder.current_size > folder.storage_limit:
+            log.warning('Storage limit exceeds: {} > {}'.format(l+folder.current_size, folder.storage_limit))
+            raise web.HTTPRequestHeaderFieldsTooLarge()
         log.debug('start uploading %s' % filename)
         with open(os.path.join(config.UPLOAD_ROOT_DIRECTORY, folder.get_file_path(file_id)), 'wb') as f:
             while True:

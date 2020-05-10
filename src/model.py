@@ -5,16 +5,25 @@ import random
 import shutil
 import logging
 from enum import IntEnum
+from time import time
 from datetime import datetime, timezone, timedelta
 
+import asyncio
 import aioredis
 from aiohttp import web
+from concurrent.futures import ThreadPoolExecutor
 
 import config
 
 log = logging.getLogger(__name__)
 redis = None
+thread_pools = ThreadPoolExecutor()
 
+
+def delete(path):
+    log.info('start deleting {}'.format(path))
+    shutil.rmtree(path, ignore_errors=True)
+    log.info('finish deleting {}'.format(path))
 
 def format_size(num, suffix='B'):
     for unit in ['', 'K','M','G','T','P','E','Z']:
@@ -23,6 +32,45 @@ def format_size(num, suffix='B'):
         num /= 1000.0
     return '%.1f%s%s' % (num, 'Yi', suffix)
 
+async def remove_expired_folders(app):
+    try:
+        while True:
+            started_time = time()
+            log.info('start removing expired folders')
+            total, deleted = 0, 0
+            keys = await redis.keys('folder:*', encoding='utf-8')
+            for k in keys:
+                identity = k[k.find(':')+1:]
+                total += 1
+                f, connections = app['folders'].get(identity, (None, []))
+                if f is None:
+                    f = Folder.open(identity)
+                if not f.expired:
+                    continue
+                deleted += 1
+                log.info('Folder {} expired'.format(identity))
+                # 1. close all connected clients
+                for ws in connections:
+                    await ws.close()
+                # 2. delete data from redis
+                await redis.delete(*Folder._keys(identity))
+                # 3. delete files from disk
+                # wait for a thread in asyncio
+                # checkout https://stackoverflow.com/a/28492261/6088837
+                path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, f.path)
+                await app.loop.run_in_executor(thread_pools, delete, path)
+            log.info('finish removing expired folders')
+            log.info('{} folders found and {} folders deleted pemanently.'.format(total, deleted))
+
+            interval = time() - started_time
+            if interval < config.DELETE_INTERVAL:
+                await asyncio.sleep(config.DELETE_INTERVAL-interval)
+    except asyncio.CancelledError:
+        log.info('task canceled')
+        # todo
+    finally:
+        pass
+
 async def startup(app):
     global redis
     # use default db 0 for test purpose
@@ -30,14 +78,12 @@ async def startup(app):
     redis = await aioredis.create_redis_pool(config.REDIS_ADDRESS, db=db)
     if not config.PROD:
         await redis.flushdb()
-        shutil.rmtree(config.UPLOAD_ROOT_DIRECTORY, ignore_errors=True)
+        delete(config.UPLOAD_ROOT_DIRECTORY)
     if not os.path.isdir(config.UPLOAD_ROOT_DIRECTORY):
         os.mkdir(config.UPLOAD_ROOT_DIRECTORY)
         # raise SystemExit('Upload path "%s" does not exist.' % config.UPLOAD_ROOT_DIRECTORY)
-    # for i in range(1, config.UPLOAD_SECOND_DIRECTORY_RANGE):
-    #     second = os.path.join(config.UPLOAD_ROOT_DIRECTORY, str(i))
-    #     if not os.path.isdir(second):
-    #         os.mkdir(second)
+    # add some quick or long running tasks
+    asyncio.create_task(remove_expired_folders(app))
 
 
 class MsgType(IntEnum):
@@ -70,7 +116,7 @@ class Folder:
     def __init__(self,
                  identity,
                  created_time=None,
-                 age=config.AGE,
+                 age=None,
                  storage_limit=config.STORAGE_PER_FOLDER,
                  current_size=0,
                  path=None,
@@ -80,7 +126,7 @@ class Folder:
         # and stored as the identity of this folder
         self.identity = identity
         self.created_time = datetime.now(timezone.utc).isoformat() if created_time is None else created_time
-        self.age = age
+        self.age = config.AGE if age is None else age
         self.storage_limit = storage_limit
         self.current_size = current_size
         self.path = path
@@ -97,7 +143,11 @@ class Folder:
 
     @property
     def expire_at(self):
-        return datetime.fromisoformat(self.created_time) + timedelta(days=self.age)
+        return datetime.fromisoformat(self.created_time) + timedelta(minutes=self.age)
+
+    @property
+    def expired(self):
+        return datetime.now(timezone.utc) > self.expire_at
     
     def format_for_view(self):
         return {
@@ -157,13 +207,13 @@ class Folder:
         return [Message(**json.loads(m)) for m in msgs_json]
   
     @classmethod
-    async def signup(cls, identity):
-        if await cls.exists(identity):
+    async def create(cls, identity, age=None):
+        if await cls._exists(identity):
             # Anti brute force must be employed to disable this exploitation
             raise web.HTTPConflict(text='Identity conflicts, please try again!')
         if False:
             raise web.HTTPInsufficientStorage(text='Disk is full, please contact the admin! Thanks.')
-        folder = cls(identity)
+        folder = Folder(identity, age)
         folder_key, msg_key = cls._keys(identity)
         # we might save a Folder object as a hashmap (i.e., a dict)
         # but all field values are strings
@@ -172,22 +222,17 @@ class Folder:
         return True
 
     @classmethod
-    async def fetch(cls, identity):
+    async def open(cls, identity):
         folder_key, _ = cls._keys(identity)
         folder_json = await redis.get(folder_key, encoding='utf-8')
         if folder_json:
             folder_dict = json.loads(folder_json)
-            folder = Folder(**folder_dict)
-            if datetime.now(timezone.utc) > folder.expire_at:
-                log.info('Folder expired')
-                return None
-            else:
-                return folder
+            return Folder(**folder_dict)
         else:
             return None
 
     @classmethod
-    async def exists(cls, identity):
+    async def _exists(cls, identity):
         folder_key, _ = cls._keys(identity)
         r = await redis.exists(folder_key)
         # int not bool

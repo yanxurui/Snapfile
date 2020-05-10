@@ -39,7 +39,7 @@ class BaseTestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cmd = 'cd ../src && PROD=False exec python main.py'
+        cmd = 'cd ../src && PROD=False exec python main.py -u'
         print('starting')
         p = subprocess.Popen(
             cmd,
@@ -60,6 +60,7 @@ class BaseTestCase(unittest.TestCase):
             # is alive
             print('closing')
             p.terminate()
+        # print(err(p))
 
     def setUp(self):
         self.signup()
@@ -195,13 +196,14 @@ class TestFileUpload(BaseTestCase):
 
     def test_upload_2_file(self):
         c = self.ws()
-        with open('large.txt', 'wb') as f:
-            f.write(b'0'*1024*1024)
-        with open('large.txt', 'rb') as f:
+        file_name = 'large.txt'
+        with open(file_name, 'w') as f:
+            f.write('0'*1000*500)
+        with open(file_name, 'rb') as f:
             large = f.read()
         files = [
             ('myfile[]', ('small.txt', 'I am in a file')),
-            ('myfile[]', ('large.txt', large)),
+            ('myfile[]', (file_name, large)),
         ]
         r = self.s.post('/files', files=files)
         self.assertEqual(r.status_code, 200)
@@ -212,8 +214,8 @@ class TestFileUpload(BaseTestCase):
             })
         self.assertDictContainsSubset(self.recv(c, file=True),
             {
-                'data': 'large.txt',
-                'size': '1.0MB'
+                'data': file_name,
+                'size': '500.0KB'
             })
 
     def test_download(self):
@@ -232,4 +234,21 @@ class TestFileUpload(BaseTestCase):
         r = self.s.get('/files/999', params={'name': 'does not exist.txt'})
         self.assertEqual(r.status_code, 200)
         # NGINX will return 404
+
+    def test_upload_out_of_space(self):
+        files = [
+            ('myfile[]', ('large.txt', '0'*1024*1024*2)),
+        ]
+        r = self.s.post('/files', files=files)
+        self.assertEqual(r.status_code, 431)
+
+
+class TestExpire(BaseTestCase):
+    def test_login(self):
+        sleep(65)
+        r = self.r('post', '/login', data={'identity': self.i})
+        self.assertEqual(r.status_code, 401)
+        # todo: check log file
+        r = self.s.get('/files/999')
+        self.assertEqual(r.status_code, 401)
 

@@ -199,6 +199,9 @@ $(function() {
         },
         complete: function(xhr, textStatus) {
             // success or error
+            if (xhr.status == 431) {
+                alert('Sorry! Your storage space is not enough!');
+            }
             percent.text(textStatus + ': ' + xhr.responseText);
         }
     };
