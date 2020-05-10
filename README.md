@@ -17,31 +17,11 @@ an anonymous file transfer application that enables you to access the file from 
 ## Test
 ```bash
 cd tests
-python -m unittest
+python -m unittest -v
 ```
 
-## Deploy
-For CentOS
-
-run as yxr
+## Install & Run
+for CentOS
+```bash
+bash install.sh
 ```
-clone project to /home/yxr/CloudUDisk/
-```
-
-run as root
-```
-ln -sf /home/yxr/CloudUDisk/nginx.conf /etc/nginx/
-mkdir -p /var/www/clouddisk/
-chown -R yxr /var/www/clouddisk/
-
-<!--
-ln -s /home/yxr/CloudUDisk/src/static /var/www/clouddisk/static
-does not work
-403 due to permission issue
-namei -om /var/www/clouddisk/static
--->
-
-/bin/cp -r /home/yxr/CloudUDisk/src/static /var/www/clouddisk/
-mkdir /var/www/clouddisk/files
-```
-
