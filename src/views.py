@@ -93,9 +93,9 @@ async def ws(request):
         log.info('Close ws connection due to unauthorization')
         await ws_current.close(code=aiohttp.WSCloseCode.Unauthorized, message='You may have logged out')
         return ws_current
-    folder.connect(ws_current)
-
     name = get_client_display_name(request)
+    ws_current['name'] = name
+    folder.connect(ws_current)
     info = folder.format_for_view()
     info['name'] = name
     await ws_current.send_json({

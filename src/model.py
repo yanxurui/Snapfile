@@ -215,9 +215,18 @@ class Folder:
 
     async def send(self, msg):
         await self.save(msg)
-        for ws in self.connections:
+        for ws in list(self.connections):
             if ws.closed:
+                self.disconnect(ws)
                 log.warning('%s disconnected but not aware.', ws['name'])
+            elif ws.close_code is not None:
+                # it should be a bug of aiohttp that we get here: closed = False but close_code is set
+                # repro steps:
+                # 1. login in chrome
+                # 2. login in safari and then quit the browser
+                # 3. send message from chrome
+                self.disconnect(ws)
+                log.warning('{} is lost due to {}'.format(ws['name'], ws.close_code))
             else:
                 await ws.send_json({
                     'action': 'send',
