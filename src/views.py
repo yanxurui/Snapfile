@@ -107,13 +107,7 @@ async def ws(request):
         # loop for message
         while True:
             ws_msg = await ws_current.receive()
-            if ws_current.closed:
-                # client such as chrome will gracefully close the connection by calling ws.close()
-                # but other browsers such as safari will not notify the server
-                folder.disconnect(ws_current)
-                log.info('%s disconnected.', name)
-                break
-            elif ws_msg.type == aiohttp.WSMsgType.TEXT:
+            if ws_msg.type == aiohttp.WSMsgType.TEXT:
                 ws_data = json.loads(ws_msg.data)
                 a = ws_data['action']
                 if a == 'send':
@@ -133,8 +127,14 @@ async def ws(request):
                 else:
                     log.warning('unknow action')
             else:
-                log.warning('unknown message type')
-        
+                log.warning('unknown message type {}'.format(str(ws_msg.type)))
+                folder.disconnect(ws_current) # for safety
+                if ws_msg.type == aiohttp.WSMsgType.CLOSE:
+                    assert ws_current.closed
+                    # client such as chrome will gracefully close the connection by calling ws.close()
+                    # but other browsers such as safari will not notify the server
+                    log.info('%s disconnected.', name)
+                break
     except Exception as e:
         if isinstance(e, asyncio.CancelledError):
             folder.disconnect(ws_current)

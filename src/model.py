@@ -42,7 +42,7 @@ async def remove_expired_folders(app):
             for k in keys:
                 identity = k[k.find(':')+1:]
                 total += 1
-                f = app['folders'].get(identity, (None, []))
+                f = app['folders'].get(identity, None)
                 if f is None:
                     f = await Folder.open(identity)
                 if not f.expired:
