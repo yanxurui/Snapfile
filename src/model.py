@@ -50,7 +50,7 @@ async def remove_expired_folders(app):
                 deleted += 1
                 log.info('Folder {} expired'.format(identity))
                 # 1. close all connected clients
-                await folder.close_all()
+                await f.close_all()
                 app['folders'].pop(identity, None) # delete if it exists
                 # 2. delete data from redis
                 await redis.delete(*Folder._keys(identity))

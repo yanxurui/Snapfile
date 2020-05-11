@@ -197,6 +197,13 @@ class TestMessaging(BaseTestCase):
         with self.assertRaises(websocket.WebSocketTimeoutException):
             self.recv(c2)
 
+    def test_unauthorized(self):
+        c = websocket.create_connection("ws://" + HOST + '/ws', timeout=1)
+        opcode, data = c.recv_data(True)
+        self.assertEqual(opcode, websocket.ABNF.OPCODE_CLOSE)
+        self.assertTrue(data.startswith(b'\x0f\xa0'))  # 4000
+        self.assertFalse(c.connected)
+
 
 class TestFileUpload(BaseTestCase):
     def test_upload_1_file(self):
@@ -264,9 +271,8 @@ class TestFileUpload(BaseTestCase):
 class TestExpire(BaseTestCase):
     def test_login(self):
         sleep(65)
+        r = self.s.get('/files/999')
+        self.assertEqual(r.status_code, 401)
         r = self.r('post', '/login', data={'identity': self.i})
         self.assertEqual(r.status_code, 401)
         # todo: check log file
-        r = self.s.get('/files/999')
-        self.assertEqual(r.status_code, 401)
-
