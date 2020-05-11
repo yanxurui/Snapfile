@@ -10,7 +10,7 @@ import aiohttp
 import aiohttp_jinja2
 from aiohttp import web, WSCloseCode
 WSCloseCode.Unauthorized = 4000 # Add a customized close code
-from aiohttp_security import remember, forget, authorized_userid
+from aiohttp_security import remember, forget, check_authorized
 from user_agents import parse
 
 import config
@@ -27,13 +27,6 @@ def get_client_display_name(request):
     return '{}/{}'.format(
         user_agent.os.family,
         user_agent.browser.family)
-
-
-async def login_required(request):
-    """authorize and return the (folder, connections)
-    """
-    identity = await authorized_userid(request) # retrieve user id from cookies
-    return await auth.check_login(request.app['folders'], identity)
 
 
 async def signup(request):
@@ -59,7 +52,7 @@ async def login(request):
 
 
 async def logout(request):
-    await login_required(request)
+    await check_authorized(request)
     location = request.app.router['static'].url_for(filename='/login.html')
     resp = web.HTTPFound(location)
     await forget(request, resp)
@@ -70,13 +63,13 @@ async def allow(request):
     """check if a user is logged in
     for NGINX auth_request directive
     """
-    await login_required(request)
+    await check_authorized(request)
     return web.Response()
 
 
 async def index(request):
     try:
-        await login_required(request)
+        await check_authorized(request)
     except web.HTTPUnauthorized:
         location = request.app.router['static'].url_for(filename='/login.html')
         raise web.HTTPFound(location)
@@ -95,7 +88,7 @@ async def ws(request):
     # When the client is unauthorized, it does not work by simply raising an HTTPException before or after the handshake
     # Instead, we call the `close` method after ws is established and the client is responsible for redirection
     try:
-        folder, connections = await login_required(request)
+        folder, connections = await check_authorized(request)
     except web.HTTPUnauthorized:
         log.info('Close ws connection due to unauthorization')
         await ws_current.close(code=aiohttp.WSCloseCode.Unauthorized, message='You may have logged out')
@@ -161,7 +154,7 @@ async def ws(request):
 
 
 async def upload(request):
-    folder, connections = await login_required(request)
+    folder, connections = await check_authorized(request)
     name = get_client_display_name(request)
     reader = await request.multipart()
     count = 0
@@ -218,7 +211,7 @@ async def upload(request):
 
 
 async def download(request):
-    folder, _ = await login_required(request)
+    folder, _ = await check_authorized(request)
     file_id = request.match_info['file_id']
     pretty_name = request.query['name'] # we can not query the filename by file id in server side
     log.info(folder.get_file_path(file_id))

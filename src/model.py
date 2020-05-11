@@ -44,7 +44,7 @@ async def remove_expired_folders(app):
                 total += 1
                 f, connections = app['folders'].get(identity, (None, []))
                 if f is None:
-                    f = Folder.open(identity)
+                    f = await Folder.open(identity)
                 if not f.expired:
                     continue
                 deleted += 1
@@ -52,6 +52,7 @@ async def remove_expired_folders(app):
                 # 1. close all connected clients
                 for ws in connections:
                     await ws.close()
+                app['folders'].pop(identity, None) # delete if it exists
                 # 2. delete data from redis
                 await redis.delete(*Folder._keys(identity))
                 # 3. delete files from disk
@@ -148,7 +149,7 @@ class Folder:
     @property
     def expired(self):
         return datetime.now(timezone.utc) > self.expire_at
-    
+
     def format_for_view(self):
         return {
             'created_time': self.created_time,

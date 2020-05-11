@@ -102,7 +102,6 @@ class BaseTestCase(unittest.TestCase):
             'data': text
         })
         c.send(data)
-
         self.assertEqual(self.recv(c), text)
 
     def recv(self, c, file=False):
@@ -163,12 +162,31 @@ class TestMessaging(BaseTestCase):
         self.assertEqual(msgs[1]['data'], '333')
 
     def test_3_connections(self):
+        """open 3 tabs in 1 browser
+        """
         c1 = self.ws()
         c2 = self.ws()
         c3 = self.ws()
         self.send(c1, 'hi')
         self.assertEqual(self.recv(c2), 'hi')
         self.assertEqual(self.recv(c3), 'hi')
+        self.send(c3, 'cheers')
+        self.assertEqual(self.recv(c1), 'cheers')
+        self.assertEqual(self.recv(c2), 'cheers')
+
+    def test_2_login(self):
+        """login from 2 browsers or devices
+        """
+        r = self.r('post', '/login', data={'identity': self.i})
+        self.assertEqual(r.status_code, 200)
+        c1 = self.ws()
+        r = self.r('post', '/login', data={'identity': self.i})
+        self.assertEqual(r.status_code, 200)
+        c2 = self.ws()
+        self.send(c1, 'hi')
+        self.assertEqual(self.recv(c2), 'hi')
+        self.send(c2, 'cheers')
+        self.assertEqual(self.recv(c1), 'cheers')
 
     def test_2_rooms(self):
         c1 = self.ws()

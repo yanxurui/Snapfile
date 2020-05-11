@@ -10,14 +10,23 @@ log = logging.getLogger(__name__)
 
 
 class SimpleAuthorizationPolicy(AbstractAuthorizationPolicy):
+    def __init__(self, cache):
+        super().__init__()
+        self.cache = cache
+
     async def authorized_userid(self, identity):
         """Retrieve authorized user id.
         Return the user_id of the user identified by the identity
         or 'None' if no user exists related to the identity.
 
-        Actually, we do not perform any authorization here but in check_login
+        Actually, we return the folder directly here
         """
-        return identity
+        if identity in self.cache:
+            folder, connections = self.cache[identity]
+            if not folder.expired:
+                return folder, connections
+        log.warning('not logged in yet')
+        return None
 
     async def permits(self, identity, permission, context=None):
         pass
@@ -38,16 +47,9 @@ async def login(cache, passcode):
     if folder.expired:
         log.warning('folder expired')
         raise web.HTTPUnauthorized()
-    connections = set()
-    cache[identity] = (folder, connections)
+    if identity not in cache:
+        # do not overwrite the cache because otherwise it will lose previous connections
+        connections = set()
+        cache[identity] = (folder, connections)
     return identity
-
-
-async def check_login(cache, identity):
-    if identity in cache:
-        folder, connections = cache[identity]
-        if not folder.expired:
-            return folder, connections
-    log.warning('not logged in yet')
-    raise web.HTTPUnauthorized()
 

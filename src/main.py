@@ -23,13 +23,14 @@ def init_app():
     app = web.Application(middlewares=[middleware])
 
     # create a global dict of identity -> (folder object, active ws connections)
-    app['folders'] = {}
+    cache = {}
+    app['folders'] = cache
 
     app.on_startup.append(model.startup)
     app.on_shutdown.append(shutdown)
 
     policy = aiohttp_security.SessionIdentityPolicy()
-    aiohttp_security.setup(app, policy, SimpleAuthorizationPolicy())
+    aiohttp_security.setup(app, policy, SimpleAuthorizationPolicy(cache))
 
     app.add_routes([
         web.get('/ws', ws),
