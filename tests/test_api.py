@@ -270,9 +270,14 @@ class TestFileUpload(BaseTestCase):
 
 class TestExpire(BaseTestCase):
     def test_login(self):
-        sleep(65)
+        c = self.ws()
+        sleep(65) # show progress bar
         r = self.s.get('/files/999')
         self.assertEqual(r.status_code, 401)
         r = self.r('post', '/login', data={'identity': self.i})
         self.assertEqual(r.status_code, 401)
+        # ws should be closed
+        opcode = c.send('hi')
+        self.assertEqual(opcode, websocket.ABNF.OPCODE_CLOSE)
+        # we could also test opcode from recv_data()
         # todo: check log file

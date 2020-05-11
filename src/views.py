@@ -129,6 +129,7 @@ async def ws(request):
             else:
                 log.warning('unknown message type {}'.format(str(ws_msg.type)))
                 folder.disconnect(ws_current) # for safety
+                # ws_msg.type == aiohttp.WSMsgType.CLOSING if closed by remove_expired_folders task
                 if ws_msg.type == aiohttp.WSMsgType.CLOSE:
                     assert ws_current.closed
                     # client such as chrome will gracefully close the connection by calling ws.close()
