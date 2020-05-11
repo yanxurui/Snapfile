@@ -102,10 +102,10 @@ async def ws(request):
         'action': 'connect',
         'info': info})
 
-    # loop for message
-    while True:
-        # if the client is closed, a special exception will be thrown and handled by the library
-        try:
+    # if the client is closed, a special exception will be thrown and handled by the library
+    try:
+        # loop for message
+        while True:
             ws_msg = await ws_current.receive()
             if ws_current.closed:
                 # client such as chrome will gracefully close the connection by calling ws.close()
@@ -135,12 +135,12 @@ async def ws(request):
             else:
                 log.warning('unknown message type')
         
-        except Exception as e:
-            if isinstance(e, asyncio.CancelledError):
-                folder.disconnect(ws_current)
-                # this occurs when the user leaves this page
-                log.info('CancelledError detected for %s.', name)
-            raise # throw whatever is captured here
+    except Exception as e:
+        if isinstance(e, asyncio.CancelledError):
+            folder.disconnect(ws_current)
+            # this occurs when the user leaves this page
+            log.info('CancelledError detected for %s.', name)
+        raise # throw whatever is captured here
 
     return ws_current
 
