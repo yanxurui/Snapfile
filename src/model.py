@@ -42,7 +42,7 @@ async def remove_expired_folders(app):
             for k in keys:
                 identity = k[k.find(':')+1:]
                 total += 1
-                f, connections = app['folders'].get(identity, (None, []))
+                f = app['folders'].get(identity, (None, []))
                 if f is None:
                     f = await Folder.open(identity)
                 if not f.expired:
@@ -50,8 +50,7 @@ async def remove_expired_folders(app):
                 deleted += 1
                 log.info('Folder {} expired'.format(identity))
                 # 1. close all connected clients
-                for ws in connections:
-                    await ws.close()
+                await folder.close_all()
                 app['folders'].pop(identity, None) # delete if it exists
                 # 2. delete data from redis
                 await redis.delete(*Folder._keys(identity))
@@ -137,6 +136,7 @@ class Folder:
                 self.identity)
             shutil.rmtree(self.path, ignore_errors=True)
             os.makedirs(os.path.join(config.UPLOAD_ROOT_DIRECTORY, self.path))
+        self.connections = set() # holds all active websocket connections
 
     @property
     def usage_percentage(self):
@@ -161,6 +161,13 @@ class Folder:
             'usage_percentage': '{:.1f}%'.format(self.usage_percentage)
         }
 
+    def serialize(self):
+        """return a serialized str
+        """
+        o = dict(self.__dict__)
+        del o['connections']
+        return json.dumps(o)
+
     def get_file_path(self, file_id=None):
         """rename uploaded file using file id to
         1. avoid overwritting by files with the same name
@@ -180,6 +187,16 @@ class Folder:
     def _keys(identity):
         return 'folder:%s' % identity, 'messages:%s' % identity
 
+    def connect(self, ws):
+        self.connections.add(ws)
+
+    def disconnect(self, ws):
+        self.connections.remove(ws)
+
+    async def close_all(self):
+        for ws in list(self.connections):
+            await ws.close()
+
     async def save(self, msg):
         """Save the message in this folder
         """
@@ -189,12 +206,23 @@ class Folder:
         tr.rpush(msg_key, json.dumps(msg))
         # upload storage size
         self.current_size += msg.size
-        tr.set(folder_key, json.dumps(self.__dict__))
+        tr.set(folder_key, self.serialize())
         ok1, ok2 = await tr.execute()
         if not (ok1 and ok2):
             log.error('transaction failed')
             return False
         return True
+
+    async def send(self, msg):
+        await self.save(msg)
+        for ws in self.connections:
+            if ws.closed:
+                log.warning('%s disconnected but not aware.', ws['name'])
+            else:
+                await ws.send_json({
+                    'action': 'send',
+                    'msgs': [msg.format_for_view()]
+                })
 
     async def retrieve(self, offset):
         if offset < 0:
@@ -219,7 +247,7 @@ class Folder:
         # we might save a Folder object as a hashmap (i.e., a dict)
         # but all field values are strings
         # save as a json object is more convenient
-        await redis.set(folder_key, json.dumps(folder.__dict__))
+        await redis.set(folder_key, folder.serialize())
         return True
 
     @classmethod

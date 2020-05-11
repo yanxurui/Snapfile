@@ -48,9 +48,8 @@ def init_app():
     return app
 
 async def shutdown(app):
-    for folder, connections in app['folders'].values():
-        for ws in list(connections):
-            await ws.close()
+    for folder in app['folders'].values():
+        await folder.close_all()
     app['folders'].clear()
 
 

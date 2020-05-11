@@ -22,9 +22,9 @@ class SimpleAuthorizationPolicy(AbstractAuthorizationPolicy):
         Actually, we return the folder directly here
         """
         if identity in self.cache:
-            folder, connections = self.cache[identity]
+            folder = self.cache[identity]
             if not folder.expired:
-                return folder, connections
+                return folder
         log.warning('not logged in yet')
         return None
 
@@ -49,7 +49,6 @@ async def login(cache, passcode):
         raise web.HTTPUnauthorized()
     if identity not in cache:
         # do not overwrite the cache because otherwise it will lose previous connections
-        connections = set()
-        cache[identity] = (folder, connections)
+        cache[identity] = folder
     return identity
 

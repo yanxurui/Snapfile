@@ -88,12 +88,12 @@ async def ws(request):
     # When the client is unauthorized, it does not work by simply raising an HTTPException before or after the handshake
     # Instead, we call the `close` method after ws is established and the client is responsible for redirection
     try:
-        folder, connections = await check_authorized(request)
+        folder = await check_authorized(request)
     except web.HTTPUnauthorized:
         log.info('Close ws connection due to unauthorization')
         await ws_current.close(code=aiohttp.WSCloseCode.Unauthorized, message='You may have logged out')
         return ws_current
-    connections.add(ws_current)
+    folder.connect(ws_current)
 
     name = get_client_display_name(request)
     info = folder.format_for_view()
@@ -110,7 +110,7 @@ async def ws(request):
             if ws_current.closed:
                 # client such as chrome will gracefully close the connection by calling ws.close()
                 # but other browsers such as safari will not notify the server
-                connections.remove(ws_current)
+                folder.disconnect(ws_current)
                 log.info('%s disconnected.', name)
                 break
             elif ws_msg.type == aiohttp.WSMsgType.TEXT:
@@ -123,15 +123,7 @@ async def ws(request):
                         size=len(ws_data['data']),
                         sender=name
                     )
-                    await folder.save(msg)
-                    for ws in connections:
-                        if ws.closed:
-                            log.warning('%s disconnected but not aware.', ws['name'])
-                        else:
-                            await ws.send_json({
-                                'action': 'send',
-                                'msgs': [msg.format_for_view()]
-                            })
+                    await folder.send(msg)
                 elif a == 'pull':
                     msgs = await folder.retrieve(ws_data['offset'])
                     await ws_current.send_json({
@@ -145,16 +137,16 @@ async def ws(request):
         
         except Exception as e:
             if isinstance(e, asyncio.CancelledError):
-                connections.remove(ws_current)
+                folder.disconnect(ws_current)
                 # this occurs when the user leaves this page
                 log.info('CancelledError detected for %s.', name)
-            raise # throw whatever captured here
+            raise # throw whatever is captured here
 
     return ws_current
 
 
 async def upload(request):
-    folder, connections = await check_authorized(request)
+    folder = await check_authorized(request)
     name = get_client_display_name(request)
     reader = await request.multipart()
     count = 0
@@ -185,8 +177,8 @@ async def upload(request):
                 size += len(chunk)
                 log.debug('writing {} for {} ...'.format(len(chunk), filename))
                 f.write(chunk) # block op
-
-        # should be in a function
+        log.debug('finish uploading %s' % filename)
+        count += 1
         msg = Message(
             type=MsgType.FILE,
             data=filename,
@@ -194,24 +186,12 @@ async def upload(request):
             sender=name,
             file_id=file_id,
         )
-        await folder.save(msg)
-        log.debug('uploading %s done' % filename)
-
-        count += 1
-        for ws in connections:
-            if ws.closed:
-                log.warning('%s disconnected but not aware.', ws['name'])
-            else:
-                await ws.send_json({
-                    'action': 'send',
-                    'msgs': [msg.format_for_view()]
-                })
-
+        await folder.send(msg)
     return web.Response(text='{} file(s) uploaded'.format(count))
 
 
 async def download(request):
-    folder, _ = await check_authorized(request)
+    folder = await check_authorized(request)
     file_id = request.match_info['file_id']
     pretty_name = request.query['name'] # we can not query the filename by file id in server side
     log.info(folder.get_file_path(file_id))
