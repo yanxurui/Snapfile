@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 
 import asyncio
 import aioredis
+import aiohttp
 from aiohttp import web
 from concurrent.futures import ThreadPoolExecutor
 
@@ -191,11 +192,11 @@ class Folder:
         self.connections.add(ws)
 
     def disconnect(self, ws):
-        self.connections.remove(ws)
+        self.connections.discard(ws)
 
-    async def close_all(self):
+    async def close_all(self, code=aiohttp.WSCloseCode.GOING_AWAY):
         for ws in list(self.connections):
-            await ws.close()
+            await ws.close(code=code)
 
     async def save(self, msg):
         """Save the message in this folder
@@ -222,9 +223,17 @@ class Folder:
             elif ws.close_code is not None:
                 # it should be a bug of aiohttp that we get here: closed = False but close_code is set
                 # repro steps:
+                # scenario 1
                 # 1. login in chrome
-                # 2. login in safari and then quit the browser
+                # 2. login in safari and then force quit the browser or wait for a couple of minutes
                 # 3. send message from chrome
+                # scenario 2
+                # NGINX's proxy_read_timeout may also lead to this although the client will be closed with 1006
+                # scenario 3:
+                # long idle in desktop chrome or safari
+
+                # todo: How can we cancel the coroutine that listen to this ws?
+                # It does not work by simply calling ws.close()
                 self.disconnect(ws)
                 log.warning('{} is lost due to {}'.format(ws['name'], ws.close_code))
             else:

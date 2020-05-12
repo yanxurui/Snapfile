@@ -98,7 +98,7 @@ $(function() {
             connected = false;
             send.prop("disabled", true);
             console.log('Websocket closed because: (' + e.code + ') ' + e.reason);
-            if (e.code == 1006)
+            if (e.code == 1006 || e.code == 1013)
             {
                 // Abnormal Closure
                 // when safari is not in focus
@@ -118,7 +118,7 @@ $(function() {
             }
         };
         conn.onerror = function(e) {
-            console.log('Error: ' + JSON.stringify(e));
+            console.log('Websocket error: ' + JSON.stringify(e));
             err_acc ++;
             // conn.close(); will be called
         };

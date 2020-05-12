@@ -47,6 +47,7 @@ def init_app():
     
     return app
 
+
 async def shutdown(app):
     for folder in app['folders'].values():
         await folder.close_all()

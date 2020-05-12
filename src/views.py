@@ -74,13 +74,12 @@ async def index(request):
         location = request.app.router['static'].url_for(filename='/login.html')
         raise web.HTTPFound(location)
     directory = request.app.router['static'].get_info()['directory']
-    log.info('directory: %s' % directory)
     location = os.path.join(directory, 'index.html')
     return web.FileResponse(path=location)
 
 
 async def ws(request):
-    ws_current = web.WebSocketResponse()
+    ws_current = web.WebSocketResponse(heartbeat=30)
     ws_ready = ws_current.can_prepare(request)
     if not ws_ready.ok:
         raise web.HTTPBadRequest()
@@ -106,7 +105,7 @@ async def ws(request):
     try:
         # loop for message
         while True:
-            ws_msg = await ws_current.receive()
+            ws_msg = await ws_current.receive(config.RECEIVE_TIMEOUT)
             if ws_msg.type == aiohttp.WSMsgType.TEXT:
                 ws_data = json.loads(ws_msg.data)
                 a = ws_data['action']
@@ -132,17 +131,21 @@ async def ws(request):
                 # ws_msg.type == aiohttp.WSMsgType.CLOSING if closed by remove_expired_folders task
                 if ws_msg.type == aiohttp.WSMsgType.CLOSE:
                     assert ws_current.closed
-                    # client such as chrome will gracefully close the connection by calling ws.close()
-                    # but other browsers such as safari will not notify the server
+                    # client such as chrome will gracefully send a close msg when closing the tab
+                    # but other browsers such as safari will not notify the server at all
                     log.info('%s disconnected.', name)
                 break
+    except asyncio.TimeoutError as e:
+        log.info('timeout')
+        await ws_current.close(code=aiohttp.WSCloseCode.TRY_AGAIN_LATER, message='Are you still there?')
     except Exception as e:
+        log.info('{} detected for {}.'.format(str(e), name))
         if isinstance(e, asyncio.CancelledError):
-            folder.disconnect(ws_current)
-            # this occurs when the user leaves this page
-            log.info('CancelledError detected for %s.', name)
+            log.info('cancelled')
+            # this occurs when the user leaves this page ??
         raise # throw whatever is captured here
-
+    finally:
+        folder.disconnect(ws_current)
     return ws_current
 
 
