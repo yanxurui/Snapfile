@@ -73,7 +73,7 @@ $(function() {
         };
         conn.onmessage = function(e) {
             var data = JSON.parse(e.data);
-            console.log('receive');
+            // console.log('receive');
             switch (data.action) {
                 case 'connect':
                     var info = data.info;
@@ -104,10 +104,10 @@ $(function() {
                 // when safari is not in focus
                 // ios safari will drop websocket connection due to inactivity
                 // and delay any timer until safari comes back to foreground
-                console.log('re-connect automatically');
-                t = 1000 * Math.pow(2, err_acc);
+                var t = 500 * Math.pow(2, err_acc); // 0.5, 1, 2, 4, 8, 16, 32
                 if (t < 60 * 1000)
                 {
+                    console.log('re-connect automatically');
                     setTimeout(connect, t);
                 }
             }
@@ -154,7 +154,7 @@ $(function() {
     send.on('click', function() {
         var text = textarea.val();
         if (text) {
-            console.log('send');
+            // console.log('send');
             conn.send(JSON.stringify({
                 action: 'send',
                 data: text
@@ -207,7 +207,6 @@ $(function() {
     };
     // forward the click event
     upload_btn.click(function () {
-        console.log('click upload_btn');
         file_input.trigger('click');
     });
     // listen on select file

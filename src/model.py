@@ -234,6 +234,7 @@ class Folder:
 
                 # todo: How can we cancel the coroutine that listen to this ws?
                 # It does not work by simply calling ws.close()
+                ws.close()
                 self.disconnect(ws)
                 log.warning('{} is lost due to {}'.format(ws['name'], ws.close_code))
             else:
