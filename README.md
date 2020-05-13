@@ -21,7 +21,7 @@ an anonymous file transfer application that enables you to access the file from 
 
 ## Install & Run
 
-### Get started quickly
+### Getting started quickly
 prerequisites
 
 * Python 3.8
@@ -30,11 +30,11 @@ prerequisites
 ```sh
 # 1. download source code
 cd
-git clone https://github.com/yanxurui/CloudDisk
-cd CloudUDisk/src
+git clone https://github.com/yanxurui/Snapfile
+cd Snapfile
 
 # 2. change configuration
-vim src/config.file
+vim snapfile/config.file
 
 # 3. install package
 # for production
@@ -43,7 +43,7 @@ python setup.py .
 # python setup.py . e
 
 # 4. start
-clouddisk
+snapfile
 ```
 
 some default configuration when `PROD = False`

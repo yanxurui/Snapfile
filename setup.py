@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='clouddisk',
+    name='snapfile',
 
     # Versions should comply with PEP440.
     version='0.1.0',
@@ -11,7 +11,7 @@ setup(
     # Author details
     author='Xurui Yan',
     author_email = "yanxurui1993@qq.com",
-    url="https://github.com/yanxurui/CloudDisk",
+    url="https://github.com/yanxurui/Snapfile",
 
     classifiers=[
         # Specify the Python versions you support here.

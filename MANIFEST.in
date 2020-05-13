@@ -1,1 +1,1 @@
-recursive-include src/static *
+recursive-include snapfile/static *
