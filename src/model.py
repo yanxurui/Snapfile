@@ -14,7 +14,7 @@ import aiohttp
 from aiohttp import web
 from concurrent.futures import ThreadPoolExecutor
 
-import config
+from . import config
 
 log = logging.getLogger(__name__)
 redis = None

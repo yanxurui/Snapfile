@@ -13,9 +13,9 @@ WSCloseCode.Unauthorized = 4000 # Add a customized close code
 from aiohttp_security import remember, forget, check_authorized
 from user_agents import parse
 
-import config
-import auth
-from model import Message, MsgType, Folder
+from . import config
+from . import auth
+from .model import Message, MsgType, Folder
 
 log = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ async def index(request):
 
 
 async def ws(request):
-    ws_current = web.WebSocketResponse(heartbeat=30)
+    ws_current = web.WebSocketResponse(heartbeat=config.HEARTBEAT)
     ws_ready = ws_current.can_prepare(request)
     if not ws_ready.ok:
         raise web.HTTPBadRequest()

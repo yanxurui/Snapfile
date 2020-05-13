@@ -1,4 +1,4 @@
-PROD = True
+PROD = False
 PORT = 8080
 REDIS_ADDRESS = 'redis://localhost'
 LOG_FILE = 'prod.log'
@@ -14,7 +14,7 @@ RECEIVE_TIMEOUT = 3600 # 1 hour
 
 # Test
 import os
-if os.environ.get('PROD', PROD) not in [True, 'True', '1']:
+if os.environ.get('PROD', str(PROD)).lower() not in {'true', 'yes', '1'}:
     PROD = False
     PORT = 8090
     LOG_FILE = 'test.log'

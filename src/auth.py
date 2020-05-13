@@ -3,7 +3,7 @@ import logging
 from aiohttp import web
 from aiohttp_security.abc import AbstractAuthorizationPolicy
 
-from model import Folder
+from .model import Folder
 
 
 log = logging.getLogger(__name__)

@@ -1,5 +1,6 @@
+import os
 import logging
-import config
+from . import config
 # This function does nothing if the root logger already has handlers configured.
 logging.basicConfig(
     filename = config.LOG_FILE,
@@ -10,13 +11,14 @@ from aiohttp import web
 from aiohttp_session import SimpleCookieStorage, session_middleware
 import aiohttp_security
 
-import model
-from auth import SimpleAuthorizationPolicy
-from views import signup, login, logout, allow, index, ws, upload, download
+from . import model
+from .auth import SimpleAuthorizationPolicy
+from .views import signup, login, logout, allow, index, ws, upload, download
 
 
 log = logging.getLogger(__name__)
-
+dir_path = os.path.dirname(os.path.realpath(__file__))
+log.info('Starting from {}'.format(dir_path))
 
 def init_app():
     middleware = session_middleware(SimpleCookieStorage())
@@ -43,7 +45,7 @@ def init_app():
         # below are static files that should be served by NGINX
         web.get('/', index), # static does not support redirect / to /index.html
         web.get('/index.html', index), # serve a single static file with auth
-        web.static('/', './static', name='static')]) # handle static files such as html, js, css
+        web.static('/', os.path.join(dir_path, 'static'), name='static')]) # handle static files such as html, js, css
     
     return app
 

@@ -39,7 +39,7 @@ class BaseTestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cmd = 'cd ../src && PROD=False exec python main.py -u'
+        cmd = 'cd .. && PROD=False exec python -m src.main -u'
         print('starting')
         p = subprocess.Popen(
             cmd,
