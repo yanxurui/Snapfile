@@ -54,6 +54,28 @@ Run as root
 bash install.sh
 ```
 
+The directory structure of /var/www/snapfile
+```
+`-- snapfile
+    |-- db
+    |   `-- appendonly.aof
+    |-- files
+    |   `-- 324
+    |       `-- thfaxm
+    |           `-- 1
+    |-- logs
+    |   |-- nginx_access.log
+    |   |-- nginx_err.log
+    |   |-- snapfile.log
+    |   `-- snapfile.out
+    `-- static
+        |-- index.html
+        |-- login.html
+        |-- main.css
+        |-- main.js
+        `-- test.html
+```
+
 ## Test
 using the classical python unittest
 ```sh
