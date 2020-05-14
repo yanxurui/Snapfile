@@ -37,23 +37,22 @@ cd Snapfile
 vim snapfile/config.file
 
 # 3. install package
-# for production
-python setup.py .
-# for development
-# python setup.py . e
+python setup.py -e .
 
 # 4. start
 snapfile
 ```
 
 some default configuration when `PROD = False`
-* PORT: The server will listen to port 8090 by default
+* PORT: The server will listen to port 8090
 * LOG_FILE: Logs are output to test.log in the current workding directory (i.e., CWD)
 * UPLOAD_ROOT_DIRECTORY: Files are stored in ./upload in CWD
 
 ### Deploy in production (CentOS)
-todo
-
+Run as root
+```sh
+bash install.sh
+```
 
 ## Test
 using the classical python unittest
