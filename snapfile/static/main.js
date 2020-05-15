@@ -104,11 +104,11 @@ $(function() {
                 // when safari is not in focus
                 // ios safari will drop websocket connection due to inactivity
                 // and delay any timer until safari comes back to foreground
-                var t = 500 * Math.pow(2, err_acc); // 0.5, 1, 2, 4, 8, 16, 32
-                if (t < 60 * 1000)
+                var t = 0.5 * Math.pow(2, err_acc); // 0.5, 1, 2, 4, 8, 16, 32
+                if (t < 60)
                 {
                     console.log('re-connect automatically after ' + t + ' seconds');
-                    setTimeout(connect, t);
+                    setTimeout(connect, t*1000);
                 }
             }
             else if (e.code == 4000)
