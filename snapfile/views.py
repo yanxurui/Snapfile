@@ -176,7 +176,7 @@ async def upload(request):
         if l + folder.current_size > folder.storage_limit:
             log.warning('Storage limit exceeds: {} > {}'.format(l+folder.current_size, folder.storage_limit))
             raise web.HTTPRequestHeaderFieldsTooLarge()
-        log.debug('start uploading %s' % filename)
+        log.info('start uploading %s' % filename)
         with open(os.path.join(config.UPLOAD_ROOT_DIRECTORY, folder.get_file_path(file_id)), 'wb') as f:
             while True:
                 chunk = await field.read_chunk(1024*1024)  # 8192 bytes by default.
@@ -184,9 +184,9 @@ async def upload(request):
                     # todo: What else could cause this besides reaching the end?
                     break
                 size += len(chunk)
-                log.debug('writing {} for {} ...'.format(len(chunk), filename))
+                log.debug('writing {} for {} ...'.format(len(chunk), filename[:30]))
                 f.write(chunk) # block op
-        log.debug('finish uploading %s' % filename)
+        log.info('finish uploading {}'.format(filename))
         count += 1
         msg = Message(
             type=MsgType.FILE,

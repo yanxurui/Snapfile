@@ -114,6 +114,10 @@ input.right {
     float: right;
 }
 
+input#cancel {
+    display: none;
+}
+
 /*hide the actual form*/
 form#file {
     display: none;

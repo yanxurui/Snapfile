@@ -173,8 +173,10 @@ $(function() {
 
 
     // =====BEGIN=====Upload files
+    var form;
     var file_input = $('form#file input');
     var upload_btn = $("input#upload_files");
+    var cancel_upload_btn = $("input#cancel");
     var percent = $('.percent');
     var lastPosition = 0;
     function formatSize(size) {
@@ -182,6 +184,16 @@ $(function() {
             return (size / 1000).toFixed(1) + 'M';
         } else {
             return size.toFixed() + 'K';
+        }
+    }
+    function toggleUpload() {
+        if (upload_btn.is(":visible")) {
+            upload_btn.hide();
+            cancel_upload_btn.show();
+        }
+        else {
+            cancel_upload_btn.hide();
+            upload_btn.show();
         }
     }
     var options = {
@@ -222,20 +234,27 @@ $(function() {
                 xhr.responseText += ' (' + formatSize(speed) + 'B/s)';
             }
             percent.text(textStatus + ': ' + xhr.responseText);
+            toggleUpload();
         }
     };
     // forward the click event
     upload_btn.click(function () {
         file_input.trigger('click');
     });
+    cancel_upload_btn.click(function () {
+        var xhr = form.data('jqxhr');
+        xhr.responseText = 'Canceled';
+        xhr.abort();
+    });
     // listen on select file
     file_input.on('change', function(){
         if (this.value) {
             // submit when the field is not empty
             // i.e., uploading immediately after selecting file(s)
-            var form = $("form#file").ajaxSubmit(options);
+            form = $("form#file").ajaxSubmit(options);
             // checkout https://stackoverflow.com/questions/12030686/html-input-file-selection-event-not-firing-upon-selecting-the-same-file
             this.value = null;
+            toggleUpload();
         }
     });
     // ======END======

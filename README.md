@@ -4,9 +4,9 @@ an anonymous file transfer application that enables you to access the file from 
 
 
 ## Features
-	* anonymous chat room
-	* file transferring across any devices
-	* expires after one day
+* anonymous chat room
+* file transferring across any devices
+* expires after one day
 
 
 ## Change log
@@ -59,6 +59,7 @@ The directory structure of /var/www/snapfile
 `-- snapfile
     |-- db
     |   `-- appendonly.aof
+    |   `-- dump.rdb
     |-- files
     |   `-- 324
     |       `-- thfaxm
