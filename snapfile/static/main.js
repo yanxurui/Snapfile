@@ -177,30 +177,49 @@ $(function() {
     var upload_btn = $("input#upload_files");
     var percent = $('.percent');
     var lastPosition = 0;
-    var lastTime = Date.now(); // current time in milliseconds
+    function formatSize(size) {
+        if (size > 1000) {
+            return (size / 1000).toFixed(1) + 'M';
+        } else {
+            return size.toFixed() + 'K';
+        }
+    }
     var options = {
-        beforeSend: function(jqXHR) {
+        beforeSubmit: function(formData, jqForm, options) {
+            // is this the right way to preserve some custom data between callbacks?
+            this.startTime = Date.now(); // current time in milliseconds
+            this.total = 0;
+            for (var i=0; i < formData.length; i++) {
+                this.total += formData[i].value.size;
+            }
+            this.lastTime = this.startTime;
+            this.lastPosition = 0;
             percent.text('0%');
         },
         uploadProgress: function(event, position, total, percentComplete) {
+            // don't know
+            // If I initiate lastTime and lastPosition in beforeSend, they won't be available here
+            // If I initiate total in beforeSubmit, it is available here but
+            // if I set total here, it is not available in complete
+            // console.log('upload...');
             var time = Date.now();
-            var timeDelta = (time - lastTime) / 1000;
-            if (timeDelta > 0.5 || total == 100) {
-                var speed = ((position - lastPosition) / 1000) / timeDelta;
-                if (speed > 1000) {
-                    speed = (speed / 1000).toFixed(1) + 'M';
-                } else {
-                    speed = speed.toFixed() + 'K';
-                }
-                percent.text(percentComplete + '% ' + speed + 'B/s');
-                lastPosition = position;
-                lastTime = time;
+            var timeSpan = time - this.lastTime;
+            if (timeSpan > 500) {
+                var speed = (position - this.lastPosition) / timeSpan; // KB/s
+                percent.text(percentComplete + '% ' + formatSize(speed) + 'B/s');
+                this.lastTime = time;
+                this.lastPosition = position;
             }
         },
         complete: function(xhr, textStatus) {
             // success or error
             if (xhr.status == 431) {
                 alert('Sorry! Your storage space is not enough!');
+            }
+            else if (xhr.status == 200) {
+                // avg speed
+                var speed = this.total / (Date.now() - this.startTime); // KB
+                xhr.responseText += ' (' + formatSize(speed) + 'B/s)';
             }
             percent.text(textStatus + ': ' + xhr.responseText);
         }
