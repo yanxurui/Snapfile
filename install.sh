@@ -47,6 +47,6 @@ EOF
 
 ## 3. start
 read -p "Please prepare https certificates for NGINX. Press enter to continue:"
-systemctl restart nginx
 systemctl restart redis
+systemctl restart nginx
 systemctl restart supervisord

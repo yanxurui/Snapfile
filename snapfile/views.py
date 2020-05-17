@@ -136,12 +136,16 @@ async def ws(request):
                 # ws_msg.type == aiohttp.WSMsgType.CLOSING if closed by remove_expired_folders task
                 if ws_msg.type == aiohttp.WSMsgType.CLOSE:
                     assert ws_current.closed
+                    # there are a few scenarios where this will happen;
+                    # case 1:
                     # client such as chrome will gracefully send a close msg when closing the tab
                     # but other browsers such as safari will not notify the server at all
+                    # case 2:
+                    # disconnected detected by heartbeat
                     log.info('{} disconnected with close code {}.'.format(name, ws_current.close_code))
                 break
     except asyncio.TimeoutError as e:
-        log.error('timeout')
+        log.error('timeout') # we should not reach here since heartbeat is turned on
         await ws_current.close(code=aiohttp.WSCloseCode.TRY_AGAIN_LATER, message='Are you still there?')
     except Exception as e:
         log.info('{} detected for {}.'.format(str(e), name))
@@ -177,15 +181,21 @@ async def upload(request):
             log.warning('Storage limit exceeds: {} > {}'.format(l+folder.current_size, folder.storage_limit))
             raise web.HTTPRequestHeaderFieldsTooLarge()
         log.info('start uploading %s' % filename)
-        with open(os.path.join(config.UPLOAD_ROOT_DIRECTORY, folder.get_file_path(file_id)), 'wb') as f:
-            while True:
-                chunk = await field.read_chunk(1024*1024)  # 8192 bytes by default.
-                if not chunk:
-                    # todo: What else could cause this besides reaching the end?
-                    break
-                size += len(chunk)
-                log.debug('writing {} for {} ...'.format(len(chunk), filename[:30]))
-                f.write(chunk) # block op
+        file_path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, folder.get_file_path(file_id))
+        try:
+            with open(file_path, 'wb') as f:
+                while True:
+                    chunk = await field.read_chunk(1024*1024)  # 8192 bytes by default.
+                    if not chunk:
+                        # todo: What else could cause this besides reaching the end?
+                        break
+                    size += len(chunk)
+                    log.debug('writing {} for {} ...'.format(len(chunk), filename[:30]))
+                    f.write(chunk) # block op
+        except Exception as e:
+            os.remove(f.name)
+            log.warning('interrupt uploading {} due to {}'.format(filename, e))
+            raise
         log.info('finish uploading {}'.format(filename))
         count += 1
         msg = Message(
