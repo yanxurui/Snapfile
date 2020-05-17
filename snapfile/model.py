@@ -59,7 +59,7 @@ async def remove_expired_folders(app):
                 # wait for a thread in asyncio
                 # checkout https://stackoverflow.com/a/28492261/6088837
                 path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, f.path)
-                await app.loop.run_in_executor(thread_pools, delete, path)
+                await asyncio.get_event_loop().run_in_executor(thread_pools, delete, path)
             log.info('finish removing expired folders')
             log.info('{} folders found and {} folders deleted pemanently.'.format(total, deleted))
 
