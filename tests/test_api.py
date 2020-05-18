@@ -251,12 +251,12 @@ class TestFileUpload(BaseTestCase):
         r = self.s.post('/files', files=files)
         self.assertEqual(r.status_code, 200)
         m = self.recv(c, file=True)
-        r = self.s.get('/files/{}'.format(m['file_id']), params={'name': m['data']})
+        r = self.s.get('/files', params={'id':m['file_id'], 'name': m['data']})
         self.assertEqual(r.status_code, 200)
         self.assertIn('X-Accel-Redirect', r.headers)
 
     def test_download_404(self):
-        r = self.s.get('/files/999', params={'name': 'does not exist.txt'})
+        r = self.s.get('/files', params={'id':999, 'name': 'does not exist.txt'})
         self.assertEqual(r.status_code, 200)
         # NGINX will return 404
 

@@ -1,11 +1,11 @@
-# File Transfer
+# Snapfile
 
-an anonymous file transfer application that enables you to access the file from any device without any account
+An anonymous file transfer application that enables you to access files from any device without any account
 
 
 ## Features
 * anonymous chat room
-* file transferring across any devices
+* file transfer across any devices
 * expires after one day
 
 

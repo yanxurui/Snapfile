@@ -41,7 +41,7 @@ def init_app():
         web.post('/logout', logout),
         web.get('/auth', allow),
         web.post('/files', upload),
-        web.get('/files/{file_id}', download),
+        web.get('/files', download),
         # below are static files that should be served by NGINX
         web.get('/', index), # static does not support redirect / to /index.html
         web.get('/index.html', index), # serve a single static file with auth

@@ -51,7 +51,11 @@ $(function() {
         }
         else if (msg.type == 1) {
             //  FILE
-            var a = $('<a target="_blank">').attr('href', '/files/' + msg.file_id + '?name=' + msg.data).text(msg.data);
+            const params = new URLSearchParams({
+                id: msg.file_id,
+                name: msg.data,
+            });
+            var a = $('<a target="_blank">').attr('href', '/files?' + params.toString()).text(msg.data);
             tr.append(
                 $('<td>').append(a),
                 $('<td class="right">').text(msg.size),

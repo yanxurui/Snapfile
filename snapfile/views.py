@@ -211,7 +211,7 @@ async def upload(request):
 
 async def download(request):
     folder = await check_authorized(request)
-    file_id = request.match_info['file_id']
+    file_id = request.query['id']
     pretty_name = request.query['name'] # we can not query the filename by file id in server side
     log.info(folder.get_file_path(file_id))
     resp = web.Response(headers={
