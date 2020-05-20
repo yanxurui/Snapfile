@@ -238,6 +238,10 @@ $(function() {
             if (xhr.status == 431) {
                 alert('Sorry! Your storage space is not enough!');
             }
+            else if (xhr.status == 413) {
+                // NGINX will return html directly
+                xhr.responseText = '413 Request Entity Too Large';
+            }
             else if (xhr.status == 200) {
                 // avg speed
                 var speed = this.total / (Date.now() - this.startTime); // KB
