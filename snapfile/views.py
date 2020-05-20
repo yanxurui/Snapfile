@@ -174,20 +174,25 @@ async def upload(request):
         if filename is None:
             # no file is selected
             continue
-        size = 0 # You cannot rely on Content-Length if transfer is chunked.
-        file_id = await folder.gen_file_id()
+        if request.headers.get('Content-Length') is None or request.headers.get('Transfer-Encoding') is not None:
+            # I am not going to support chunked encoding
+            # Do not rely on Content-Length if transfer is chunked.
+            raise web.HTTPBadRequest()
         l = int(request.headers['Content-Length'])
         if l + folder.current_size > folder.storage_limit:
+            # it should be fine to check storage limit using Content-Length which represents the total size of the request
             log.warning('Storage limit exceeds: {} > {}'.format(l+folder.current_size, folder.storage_limit))
             raise web.HTTPRequestHeaderFieldsTooLarge()
         log.info('start uploading %s' % filename)
+        file_id = await folder.gen_file_id()
         file_path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, folder.get_file_path(file_id))
+        size = 0
         try:
             with open(file_path, 'wb') as f:
                 while True:
                     chunk = await field.read_chunk(1024*1024)  # 8192 bytes by default.
                     if not chunk:
-                        # todo: What else could cause this besides reaching the end?
+                        # todo: What else could cause this besides reaching the end of a file?
                         break
                     size += len(chunk)
                     log.debug('writing {} for {} ...'.format(len(chunk), filename[:30]))
@@ -201,7 +206,7 @@ async def upload(request):
         msg = Message(
             type=MsgType.FILE,
             data=filename,
-            size=size, # todo
+            size=size,
             sender=name,
             file_id=file_id,
         )
@@ -213,7 +218,6 @@ async def download(request):
     folder = await check_authorized(request)
     file_id = request.query['id']
     pretty_name = request.query['name'] # we can not query the filename by file id in server side
-    log.info(folder.get_file_path(file_id))
     resp = web.Response(headers={
         'Content-Disposition': 'attachment; filename="{0}"'.format(pretty_name),
         'X-Accel-Redirect': '/download/{}'.format(folder.get_file_path(file_id))

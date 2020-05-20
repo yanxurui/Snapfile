@@ -63,8 +63,8 @@ class BaseTestCase(unittest.TestCase):
         # print(err(p))
 
     def setUp(self):
-        self.signup()
-        self.connections = []
+        self.signup() # create a new folder
+        self.connections = [] # websocket connections
 
     def tearDown(self):
         self.s.close()
@@ -272,7 +272,7 @@ class TestExpire(BaseTestCase):
     def test_login(self):
         c = self.ws()
         sleep(65) # show progress bar
-        r = self.s.get('/files/999')
+        r = self.s.get('/files')
         self.assertEqual(r.status_code, 401)
         r = self.r('post', '/login', data={'identity': self.i})
         self.assertEqual(r.status_code, 401)

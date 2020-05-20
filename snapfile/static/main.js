@@ -104,7 +104,7 @@ $(function() {
             console.log('Websocket closed because: (' + e.code + ') ' + e.reason);
             if (e.code == 1006 || e.code == 1013)
             {
-                // Abnormal Closure
+                // Abnormal Closure or Try Again Later
                 // when safari is not in focus
                 // ios safari will drop websocket connection due to inactivity
                 // and delay any timer until safari comes back to foreground
@@ -114,6 +114,12 @@ $(function() {
                     console.log('re-connect automatically after ' + t + ' seconds');
                     setTimeout(connect, t*1000);
                 }
+            }
+            else if (e.code == 1001)
+            {
+                // Going Away
+                alert('You are logged out!');
+                window.location = 'login.html';
             }
             else if (e.code == 4000)
             {
