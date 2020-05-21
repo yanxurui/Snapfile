@@ -10,11 +10,12 @@ from time import sleep
 import requests
 import websocket # websocket_client
 
+HOST = '127.0.0.1:8090'
+LOG = '../test.log'
 
 # set base url for requests by monkey patch
 # using localhost will trigger 'site-packages/websocket/_http.py:165: ResourceWarning: unclosed <socket.socket'
 # even if the socket is closed
-HOST = '127.0.0.1:8090'
 class SessionWithUrlBase(requests.Session):
     def __init__(self, url_base=HOST, *args, **kwargs):
         super(SessionWithUrlBase, self).__init__(*args, **kwargs)
@@ -31,6 +32,7 @@ def err(p):
 
 class BaseTestCase(unittest.TestCase):
     identity = 0
+    log = None
 
     @classmethod
     def count(cls):
@@ -39,8 +41,9 @@ class BaseTestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        if os.path.isfile(LOG):
+            os.remove(LOG)
         cmd = 'cd .. && PROD=False exec python -m snapfile.main -u'
-        print('starting')
         p = subprocess.Popen(
             cmd,
             # stdin=open(os.devnull),
@@ -51,6 +54,7 @@ class BaseTestCase(unittest.TestCase):
         # not terminated
         assert p.poll() is None, err(p)
         cls.p = p
+        cls.log = open(LOG)
 
     @classmethod
     def tearDownClass(cls):
@@ -61,10 +65,12 @@ class BaseTestCase(unittest.TestCase):
             print('closing')
             p.terminate()
         # print(err(p))
+        cls.log.close()
 
     def setUp(self):
         self.signup() # create a new folder
         self.connections = [] # websocket connections
+        self.checkLog() # skip previous logs
 
     def tearDown(self):
         self.s.close()
@@ -75,6 +81,24 @@ class BaseTestCase(unittest.TestCase):
         for k, v in sub.items():
             self.assertIn(k, d)
             self.assertEqual(d[k], v)
+
+    def checkLog(self, text=None, present=True):
+        logs = []
+        line = ''
+        while True:
+            tmp = self.log.readline()
+            if not tmp:
+                break
+            line += tmp
+            if line.endswith('\n'):
+                logs.append(line)
+                line = ''
+        logs = ''.join(logs)
+        if text is not None:
+            if present:
+                self.assertIn(text, logs)
+            else:
+                self.assertNotIn(text, logs)
 
     def r(self, method, url, data=None):
         return requests.request(method, 'http://'+HOST+url, data=data)
@@ -204,6 +228,13 @@ class TestMessaging(BaseTestCase):
         self.assertTrue(data.startswith(b'\x0f\xa0'))  # 4000
         self.assertFalse(c.connected)
 
+    def test_abort(self):
+        c = self.ws()
+        c.abort()
+        sleep(60)
+
+
+
 
 class TestFileUpload(BaseTestCase):
     def test_upload_1_file(self):
@@ -270,14 +301,24 @@ class TestFileUpload(BaseTestCase):
 
 class TestExpire(BaseTestCase):
     def test_login(self):
-        c = self.ws()
-        sleep(65) # show progress bar
+        c1 = self.ws()
+        c2 = self.ws()
+        sleep(4.5)
+        self.checkLog('1 folders found and 0 folders deleted')
+        # expired after 6 seconds
+        sleep(2)
         r = self.s.get('/files')
         self.assertEqual(r.status_code, 401)
         r = self.r('post', '/login', data={'identity': self.i})
         self.assertEqual(r.status_code, 401)
         # ws should be closed
-        opcode = c.send('hi')
+        c1.send('hi')
+        opcode, frame = c1.recv_data()
         self.assertEqual(opcode, websocket.ABNF.OPCODE_CLOSE)
-        # we could also test opcode from recv_data()
-        # todo: check log file
+        self.assertIn(b'Expired', frame)
+        sleep(2)
+        # folder should be deleted now
+        self.checkLog('1 folders deleted')
+        opcode, frame = c2.recv_data()
+        self.assertEqual(opcode, websocket.ABNF.OPCODE_CLOSE)
+        self.assertIn(b'Deleted', frame)

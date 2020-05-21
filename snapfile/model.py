@@ -51,7 +51,7 @@ async def remove_expired_folders(app):
                 deleted += 1
                 log.info('Folder {} expired'.format(identity))
                 # 1. close all connected clients
-                await f.close_all()
+                await f.close_all(code=aiohttp.WSCloseCode.GOING_AWAY, message='Deleted')
                 app['folders'].pop(identity, None) # delete if it exists
                 # 2. delete data from redis
                 await redis.delete(*Folder._keys(identity))
@@ -145,7 +145,7 @@ class Folder:
 
     @property
     def expire_at(self):
-        return datetime.fromisoformat(self.created_time) + timedelta(minutes=self.age)
+        return datetime.fromisoformat(self.created_time) + timedelta(seconds=self.age)
 
     @property
     def expired(self):
@@ -194,9 +194,10 @@ class Folder:
     def disconnect(self, ws):
         self.connections.discard(ws)
 
-    async def close_all(self, code=aiohttp.WSCloseCode.GOING_AWAY):
+    async def close_all(self, code=aiohttp.WSCloseCode.GOING_AWAY, message=''):
+        log.info('close {} websocket connections'.format(len(self.connections)))
         for ws in list(self.connections):
-            await ws.close(code=code)
+            await ws.close(code=code, message=message)
 
     async def save(self, msg):
         """Save the message in this folder
@@ -267,6 +268,7 @@ class Folder:
         # but all field values are strings
         # save as a json object is more convenient
         await redis.set(folder_key, folder.serialize())
+        log.info('Create a new folder {}'.format(identity))
         return True
 
     @classmethod

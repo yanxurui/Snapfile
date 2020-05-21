@@ -112,6 +112,10 @@ async def ws(request):
             # the timeout should never occur because of the heartbeat mechanism
             ws_msg = await ws_current.receive(config.RECEIVE_TIMEOUT)
             if ws_msg.type == aiohttp.WSMsgType.TEXT:
+                if folder.expired:
+                    log.info('expiration detected for websocket')
+                    await ws_current.close(code=aiohttp.WSCloseCode.GOING_AWAY, message='Expired!')
+                    break
                 ws_data = json.loads(ws_msg.data)
                 a = ws_data['action']
                 if a == 'send':
@@ -132,7 +136,6 @@ async def ws(request):
                     log.warning('unknow action')
             else:
                 log.warning('unknown message type {}'.format(str(ws_msg.type)))
-                folder.disconnect(ws_current) # for safety
                 # ws_msg.type == aiohttp.WSMsgType.CLOSING if closed by remove_expired_folders task
                 if ws_msg.type == aiohttp.WSMsgType.CLOSE:
                     assert ws_current.closed
@@ -143,12 +146,16 @@ async def ws(request):
                     # case 2:
                     # disconnected detected by heartbeat
                     log.info('{} disconnected with close code {}.'.format(name, ws_current.close_code))
+                elif ws_msg.type == aiohttp.WSMsgType.CLOSING:
+                    # call ws.close() in other coroutines will also lead to here through CLOSING
+                    # in this case we don't have to call close again
+                    pass
                 break
     except asyncio.TimeoutError as e:
         log.error('timeout') # we should not reach here since heartbeat is turned on
         await ws_current.close(code=aiohttp.WSCloseCode.TRY_AGAIN_LATER, message='Are you still there?')
     except Exception as e:
-        log.info('{} detected for {}.'.format(str(e), name))
+        log.info('{} detected for {}.'.format(e.__class__.__name__, name))
         if isinstance(e, asyncio.CancelledError):
             log.info('cancelled')
             # this occurs when the user leaves this page ??

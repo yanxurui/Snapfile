@@ -23,9 +23,12 @@ class SimpleAuthorizationPolicy(AbstractAuthorizationPolicy):
         """
         if identity in self.cache:
             folder = self.cache[identity]
-            if not folder.expired:
+            if folder.expired:
+                log.warning('folder expired')
+            else:
                 return folder
-        log.warning('not logged in yet')
+        else:
+            log.warning('not logged in yet')
         return None
 
     async def permits(self, identity, permission, context=None):
