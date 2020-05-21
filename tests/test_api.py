@@ -62,7 +62,6 @@ class BaseTestCase(unittest.TestCase):
         poll = p.poll()
         if poll is None:
             # is alive
-            print('closing')
             p.terminate()
         # print(err(p))
         cls.log.close()
@@ -231,9 +230,8 @@ class TestMessaging(BaseTestCase):
     def test_abort(self):
         c = self.ws()
         c.abort()
-        sleep(60)
-
-
+        sleep(0.5)
+        self.checkLog('CancelledError')
 
 
 class TestFileUpload(BaseTestCase):

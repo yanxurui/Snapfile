@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import logging
 from pprint import pprint
@@ -93,7 +94,7 @@ async def ws(request):
     try:
         folder = await check_authorized(request)
     except web.HTTPUnauthorized:
-        log.info('Close ws connection due to unauthorization')
+        log.info('close ws connection due to unauthorization')
         await ws_current.close(code=aiohttp.WSCloseCode.Unauthorized, message='You may have logged out')
         return ws_current
     name = get_client_display_name(request)
@@ -105,7 +106,6 @@ async def ws(request):
         'action': 'connect',
         'info': info})
 
-    # if the client is closed, a special exception will be thrown and handled by the library
     try:
         # loop for message
         while True:
@@ -154,13 +154,12 @@ async def ws(request):
     except asyncio.TimeoutError as e:
         log.error('timeout') # we should not reach here since heartbeat is turned on
         await ws_current.close(code=aiohttp.WSCloseCode.TRY_AGAIN_LATER, message='Are you still there?')
-    except Exception as e:
-        log.info('{} detected for {}.'.format(e.__class__.__name__, name))
-        if isinstance(e, asyncio.CancelledError):
-            log.info('cancelled')
-            # this occurs when the user leaves this page ??
+    except:
+        log.info('{} detected for {}'.format(sys.exc_info()[0], name))
+        # CancelledError will be thrown when the client aborts and be handled by the library automatically
         raise # throw whatever is captured here
     finally:
+        log.debug('{} exits'.format(name))
         folder.disconnect(ws_current)
     return ws_current
 
