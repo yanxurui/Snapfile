@@ -10,6 +10,10 @@ An anonymous file transfer application that enables you to access files from any
 
 
 ## Change log
+### Version 0.2
+* better at handle disconnection
+* cancel uploading file
+
 ### Version 0.1
 * instant messaging is implemented by websocket
 * 2 messge types: text and file: text body and file name are stored in the data field of a message 
@@ -34,7 +38,7 @@ cd
 git clone https://github.com/yanxurui/Snapfile
 cd Snapfile
 
-# 2. change configuration
+# 2. change default configuration
 vim snapfile/config.file
 
 # 3. install package
@@ -44,10 +48,10 @@ python setup.py -e .
 snapfile
 ```
 
-some default configuration when `PROD = False`
-* PORT: The server will listen to port 8090
-* LOG_FILE: Logs are output to test.log in the current workding directory (i.e., CWD)
-* UPLOAD_ROOT_DIRECTORY: Files are stored in ./upload in CWD
+some default configuration
+* PORT: The server will listen to port 8080
+* LOG_FILE: Logs are output to `test.log` in the current workding directory (i.e., CWD)
+* UPLOAD_ROOT_DIRECTORY: Files are stored in `./upload` in CWD
 
 ### Deploy in production (CentOS)
 Run as root
@@ -79,13 +83,15 @@ The directory structure of /var/www/snapfile
 ```
 
 ## Test
-using the classical python unittest
-```sh
-python -m unittest -v -p test*.py
-```
 
 ### test_api.py
 Functional test for APIs of python backend:
+using the classical python unittest
+```sh
+cd tests
+python -m unittest -v -p test*.py
+```
+
 * use a separate port 8090
 * select db 0 of Redis
 * clean all data at startup
