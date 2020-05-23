@@ -53,13 +53,13 @@ async def remove_expired_folders(app):
                 # 1. close all connected clients
                 await f.close_all(code=aiohttp.WSCloseCode.GOING_AWAY, message='Deleted')
                 app['folders'].pop(identity, None) # delete if it exists
-                # 2. delete data from redis
-                await redis.delete(*Folder._keys(identity))
-                # 3. delete files from disk
-                # wait for a thread in asyncio
-                # checkout https://stackoverflow.com/a/28492261/6088837
+                # 2. delete files from disk
+                # do a time consuming task in in a seprate thread and wait for the thread in asyncio
+                # https://stackoverflow.com/a/28492261/6088837
                 path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, f.path)
                 await asyncio.get_event_loop().run_in_executor(thread_pools, delete, path)
+                # 3. delete data from redis
+                await redis.delete(*Folder._keys(identity))
             log.info('finish removing expired folders')
             log.info('{} folders found and {} folders deleted pemanently.'.format(total, deleted))
 

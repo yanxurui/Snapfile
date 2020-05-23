@@ -6,6 +6,7 @@ import json
 import unittest
 import subprocess
 from time import sleep
+from collections import Iterable
 
 import requests
 import websocket # websocket_client
@@ -69,19 +70,20 @@ class BaseTestCase(unittest.TestCase):
     def setUp(self):
         self.signup() # create a new folder
         self.connections = [] # websocket connections
-        self.checkLog() # skip previous logs
 
     def tearDown(self):
         self.s.close()
         for c in self.connections:
             c.close()
+         # skip previous logs and check there is no error
+        self.checkLog('Traceback', 'ERROR', present=False)
 
     def assertDictContainsSubset(self, d, sub):
         for k, v in sub.items():
             self.assertIn(k, d)
             self.assertEqual(d[k], v)
 
-    def checkLog(self, text=None, present=True):
+    def checkLog(self, *text, present=True):
         logs = []
         line = ''
         while True:
@@ -93,11 +95,12 @@ class BaseTestCase(unittest.TestCase):
                 logs.append(line)
                 line = ''
         logs = ''.join(logs)
-        if text is not None:
-            if present:
-                self.assertIn(text, logs)
-            else:
-                self.assertNotIn(text, logs)
+        if present:
+            for t in text:
+                self.assertIn(t, logs)
+        else:
+            for t in text:
+                self.assertNotIn(t, logs)
 
     def r(self, method, url, data=None):
         return requests.request(method, 'http://'+HOST+url, data=data)
@@ -226,6 +229,12 @@ class TestMessaging(BaseTestCase):
         self.assertEqual(opcode, websocket.ABNF.OPCODE_CLOSE)
         self.assertTrue(data.startswith(b'\x0f\xa0'))  # 4000
         self.assertFalse(c.connected)
+
+    def test_close(self):
+        c = self.ws()
+        c.close()
+        sleep(0.5)
+        self.checkLog('disconnected with close code 1000')
 
     def test_abort(self):
         c = self.ws()
