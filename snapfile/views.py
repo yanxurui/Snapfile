@@ -155,8 +155,12 @@ async def ws(request):
         log.error('timeout') # we should not reach here since heartbeat is turned on
         await ws_current.close(code=aiohttp.WSCloseCode.TRY_AGAIN_LATER, message='Are you still there?')
     except:
+        # capture all exceptions not just Exception
         log.info('{} detected for {}'.format(sys.exc_info()[0], name))
-        # CancelledError will be thrown when the client aborts and be handled by the library automatically
+        # CancelledError will be thrown when
+        # 1. the client aborts
+        # 2. the client lost network and heartbeat fails
+        # this exception will be handled by the library automatically
         raise # throw whatever is captured here
     finally:
         log.debug('{} exits'.format(name))
@@ -203,9 +207,11 @@ async def upload(request):
                     size += len(chunk)
                     log.debug('writing {} for {} ...'.format(len(chunk), filename[:30]))
                     f.write(chunk) # block op
-        except Exception as e:
+        except:
+            # if client abort uploading
+            # asyncio.exceptions.CancelledError will be captured here
             os.remove(f.name)
-            log.warning('interrupt uploading {} due to {}'.format(filename, e))
+            log.warning('interrupt uploading {} due to {}'.format(filename, sys.exc_info()[0]))
             raise
         log.info('finish uploading {}'.format(filename))
         count += 1

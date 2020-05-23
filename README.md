@@ -17,6 +17,7 @@ An anonymous file transfer application that enables you to access files from any
 	* each folder has a corresponding path in the server where files uploaded to this folder are stored
 	* uploading is handled directly in Python
 * download: files are served by NGINX using `X-accel`
+* backend only uses a single thread in Python
 
 
 ## Install & Run
