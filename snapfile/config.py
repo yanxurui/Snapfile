@@ -1,6 +1,6 @@
 # DEFAULT
 PROD = False
-PORT = 8080
+PORT = 8090
 REDIS_ADDRESS = 'redis://localhost'
 LOG_LEVEL = 'DEBUG'
 LOG_FILE = 'test.log'

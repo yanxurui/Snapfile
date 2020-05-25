@@ -9,6 +9,9 @@ html, body {margin: 0; height: 100%; overflow: hidden}
     display: flex;
     flex-flow: column;
 }
+#container.dragging {
+    background-color: antiquewhite;
+}
 #top {
     flex: 0 1 auto;
 }
@@ -75,6 +78,7 @@ textarea {
     /*height: 100%;*/
     box-sizing: border-box;
     font-size: 18px;
+    background: transparent;
 }
 
 /*bootstrap's outline buttons*/

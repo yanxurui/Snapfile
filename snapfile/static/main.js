@@ -271,5 +271,27 @@ $(function() {
             toggleUpload();
         }
     });
+
+    // enable drag & drop
+    $('#container')
+    .on('dragover', function(e) {
+        // it's more reliable to add class here instead of when dragenter
+        $(this).addClass('dragging');
+        // crucial for the 'drop' event to fire
+        // Returning false from an event handler will automatically call event.stopPropagation() and event.preventDefault()
+        return false;
+    })
+    .on('dragleave', function(e) {
+        $(this).removeClass('dragging');
+        return false;
+    })
+    .on('drop', function(e) {
+        $(this).removeClass('dragging');
+        var files = e.originalEvent.dataTransfer.files;
+        file_input.prop('files', files);
+        console.log(files);
+        file_input.trigger("change");
+        return false;
+    });
     // ======END======
 });
