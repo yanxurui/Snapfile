@@ -10,6 +10,9 @@ An anonymous file transfer application that enables you to access files from any
 
 
 ## Change log
+### Version 0.3
+* drag&drop to upload files
+
 ### Version 0.2
 * better at handle disconnection
 * cancel uploading file
@@ -49,7 +52,7 @@ snapfile
 ```
 
 some default configuration
-* PORT: The server will listen to port 8080
+* PORT: The server will listen to port 8090
 * LOG_FILE: Logs are output to `test.log` in the current workding directory (i.e., CWD)
 * UPLOAD_ROOT_DIRECTORY: Files are stored in `./upload` in CWD
 
