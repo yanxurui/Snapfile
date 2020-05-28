@@ -51,4 +51,4 @@ read -p "Please prepare https certificates for NGINX. Press enter to continue:"
 systemctl restart redis
 systemctl restart nginx
 systemctl restart supervisord
-supervisorctl status snapfile && echo "cheers!"
+supervisorctl start snapfile && echo "cheers!"

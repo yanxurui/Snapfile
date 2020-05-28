@@ -289,7 +289,6 @@ $(function() {
         $(this).removeClass('dragging');
         var files = e.originalEvent.dataTransfer.files;
         file_input.prop('files', files);
-        console.log(files);
         file_input.trigger("change");
         return false;
     });
