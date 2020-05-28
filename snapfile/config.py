@@ -18,11 +18,11 @@ import os
 ENV = os.environ.get('ENV')
 if ENV == 'PROD':
     PROD = True
+    PORT = 8080
     LOG_LEVEL = 'INFO'
     LOG_FILE = None # rely on supervisord to manage log rotation
     UPLOAD_ROOT_DIRECTORY = '/var/www/snapfile/files'
 elif ENV == 'TEST':
-    PORT = 8090
     AGE = 6
     STORAGE_PER_FOLDER = 10**6 # 1 MB
     DELETE_INTERVAL = 4
