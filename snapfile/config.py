@@ -19,7 +19,7 @@ ENV = os.environ.get('ENV')
 if ENV == 'PROD':
     PROD = True
     LOG_LEVEL = 'INFO'
-    LOG_FILE = '/var/www/snapfile/logs/snapfile.log'
+    LOG_FILE = None # rely on supervisord to manage log rotation
     UPLOAD_ROOT_DIRECTORY = '/var/www/snapfile/files'
 elif ENV == 'TEST':
     PORT = 8090

@@ -57,7 +57,7 @@ some default configuration
 * UPLOAD_ROOT_DIRECTORY: Files are stored in `./upload` in CWD
 
 ### Deploy in production (CentOS)
-Run as root
+Change the `prefix` and `user` in `install.sh` and then run it using root
 ```sh
 bash install.sh
 ```

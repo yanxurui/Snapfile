@@ -34,7 +34,8 @@ setup(
         'aiohttp',
         'aiohttp-security',
         'aiohttp-session',
-        'aioredis'
+        'aioredis',
+        'user_agents'
     ],
 
     # To provide executable scripts, use entry points in preference to the

@@ -8,7 +8,6 @@ from datetime import datetime
 
 import asyncio
 import aiohttp
-import aiohttp_jinja2
 from aiohttp import web, WSCloseCode
 WSCloseCode.Unauthorized = 4000 # Add a customized close code
 from aiohttp_security import remember, forget, check_authorized

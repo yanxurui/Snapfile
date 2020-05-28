@@ -1,16 +1,17 @@
 set -x # echo on
 set -e # exit on error
 
-## 1. install prerequisites
-packageList="nginx redis supervisor"
-for p in $packageList; do
-  rpm --quiet --query $p || sudo yum install -y $packageName
-done
-
-## 2. install
+user=yxr
 prefix=/var/www/snapfile
 pyversion=3.8.1
 
+## 1. install prerequisites
+packageList="nginx redis supervisor"
+for p in $packageList; do
+  rpm --quiet --query $p || sudo yum install -y $p
+done
+
+## 2. install
 mkdir -p $prefix
 
 cwd=$(pwd)
@@ -24,16 +25,16 @@ cd $prefix
 mkdir -p files
 mkdir -p logs
 mkdir -p db
-chown -R yxr $prefix
+chown -R $user $prefix
 chown -R redis $prefix/db
 
-sudo -i -u yxr <<EOF
+sudo -i -u $user <<EOF
     set -v
     set -e
 
-    if [ ! -d /home/yxr/.pyenv/versions/$pyversion ]
+    if [ ! -d /home/$user/.pyenv/versions/$pyversion ]
     then
-        echo "please install $pyversion using pyenv for user yxr first"
+        echo "please install $pyversion using pyenv for user $user first"
         exit 1
     fi
 
@@ -50,3 +51,4 @@ read -p "Please prepare https certificates for NGINX. Press enter to continue:"
 systemctl restart redis
 systemctl restart nginx
 systemctl restart supervisord
+supervisorctl status snapfile && echo "cheers!"
