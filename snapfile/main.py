@@ -37,13 +37,14 @@ def init_app():
     app.add_routes([
         web.get('/ws', ws),
         web.post('/signup', signup),
-        web.post('/login', login, name='login'),
+        web.post('/login', login),
+        web.get('/login', login), # for shared link
         web.post('/logout', logout),
         web.get('/auth', allow),
         web.post('/files', upload),
         web.get('/files', download),
         # below are static files that should be served by NGINX
-        web.get('/', index), # static does not support redirect / to /index.html
+        web.get('/', index, name='index'), # static does not support redirect / to /index.html
         web.get('/index.html', index), # serve a single static file with auth
         web.static('/', os.path.join(dir_path, 'static'), name='static')]) # handle static files such as html, js, css
     

@@ -41,12 +41,21 @@ async def signup(request):
 
 
 async def login(request):
-    form_data = await request.post()
-    identity = form_data['identity']
+    if request.method == 'GET':
+        resp = web.Response()
+        identity = request.query.get('identity')
+        location = request.app.router['index'].url_for()
+        resp = web.HTTPFound(location)
+    else:
+        assert request.method == 'POST'
+        form_data = await request.post()
+        identity = form_data['identity']
+        # return 200 because ajax has trouble handling redirecting if 302 is returned
+        resp = web.Response()
+    if not identity:
+        raise web.HTTPBadRequest()
     # usually this should be user name & password
     identity = await auth.login(request.app['folders'], identity)
-    # ajax has trouble handling redirecting if 302 is returned
-    resp = web.Response()
     await remember(request, resp, identity)
     return resp
 

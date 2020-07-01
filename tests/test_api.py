@@ -102,8 +102,8 @@ class BaseTestCase(unittest.TestCase):
             for t in text:
                 self.assertNotIn(t, logs)
 
-    def r(self, method, url, data=None):
-        return requests.request(method, 'http://'+HOST+url, data=data)
+    def r(self, method, url, **kwargs):
+        return requests.request(method, 'http://'+HOST+url, **kwargs)
     
     def signup(self):
         self.i = BaseTestCase.count()
@@ -170,6 +170,10 @@ class TestLogin(BaseTestCase):
         r = self.s.post('/logout', allow_redirects=False)
         self.assertEqual(r.status_code, 302)
         self.assertTrue('/login.html' in r.headers['Location'])
+
+    def test_login_by_shared_link(self):
+        r = self.r('get', '/login', params={'identity': self.i})
+        self.assertEqual(r.status_code, 200)
 
 
 class TestMessaging(BaseTestCase):

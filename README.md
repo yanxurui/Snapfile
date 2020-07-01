@@ -56,7 +56,7 @@ some default configuration
 * LOG_FILE: Logs are output to `test.log` in the current workding directory (i.e., CWD)
 * UPLOAD_ROOT_DIRECTORY: Files are stored in `./upload` in CWD
 
-### Deploy in production (CentOS)
+### Deploy in production mode (CentOS)
 Change the `prefix` and `user` in `install.sh` and then run it using root
 ```sh
 bash install.sh
@@ -92,7 +92,7 @@ Functional test for APIs of python backend:
 using the classical python unittest
 ```sh
 cd tests
-python -m unittest -v -p test*.py
+python -m unittest -v test_api.py
 ```
 
 * use a separate port 8090
