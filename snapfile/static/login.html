@@ -72,6 +72,7 @@
                         data: { identity: sha256(passcode)},
                         statusCode: {
                             200: function () {
+                                sessionStorage.setItem("identity", passcode);
                                 window.location = '/';
                             },
                             401: function () {
@@ -101,6 +102,7 @@
                         statusCode: {
                             201: function () {
                                 alert("Please save your passcode: " + passcode);
+                                sessionStorage.setItem("identity", passcode);
                                 window.location = '/';
                             },
                             409: function (jqXHR) {
