@@ -148,19 +148,6 @@ $(function() {
         // awesome, it works like a template engine
         $('#status_bar').html(status_bar_tmpl.formatUnicorn(data));
         // the drawback is that event callbacks registered on these dom before will disappear
-        // so register them again
-        $('#logout').on('click', function() {
-            disconnect();
-            // $.post('/logout'); does not redirect properly
-            // see: https://stackoverflow.com/q/8389646/6088837
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = '/logout';
-            document.body.appendChild(form);
-            form.submit();
-            sessionStorage.removeItem("identity");
-            return false;
-        });
     }
 
     send.on('click', function() {
@@ -176,6 +163,20 @@ $(function() {
                 textarea.focus(); // bad UE on mobile
             }
         }
+        return false;
+    });
+
+    // register logout event
+    $('#logout').on('click', function() {
+        disconnect();
+        // $.post('/logout'); does not redirect properly
+        // see: https://stackoverflow.com/q/8389646/6088837
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/logout';
+        document.body.appendChild(form);
+        form.submit();
+        sessionStorage.removeItem("identity");
         return false;
     });
     
