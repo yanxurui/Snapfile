@@ -84,7 +84,7 @@ $(function() {
                     // new Date from isoformat
                     // format to m-d HH:MM
                     info.expire_at = formatDate(new Date(info.expire_at));
-                    info.identity = sessionStorage.getItem("identity");
+                    info.identity = localStorage.getItem("identity");
                     update_status(info);
                     conn.send(JSON.stringify({
                         action: 'pull',
@@ -176,7 +176,7 @@ $(function() {
         form.action = '/logout';
         document.body.appendChild(form);
         form.submit();
-        sessionStorage.removeItem("identity");
+        localStorage.removeItem("identity");
         return false;
     });
     
