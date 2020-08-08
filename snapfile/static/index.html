@@ -7,6 +7,7 @@
     <link rel="stylesheet" type="text/css" href="main.css">
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.min.js"></script>
     <script src="https://cdn.jsdelivr.net/combine/npm/jquery@3.5.1,npm/jquery-form@4.3.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode_js@1.0.0/qrcode.min.js"></script>
     <script type="text/javascript" src="main.js"></script>
 </head>
 
@@ -19,7 +20,20 @@
                 <span>{usage_percentage} of {storage_limit} used</span>
                 <!-- <span id="name">I am using {name}</span> -->
             </p>
-            <input id="logout" type="button" value="Logout">
+            <div id="dropdown">
+                <div id="toggle">
+                  <div class="one"></div>
+                  <div class="two"></div>
+                  <div class="three"></div>
+                </div>
+                <div id="menu">
+                  <ul>
+                    <li><a id="share" href="#">Share</a></li>
+                    <!-- <li><a href="#">About</a></li> -->
+                    <li><a id="logout" href="#">Logout</a></li>
+                  </ul>
+                </div>
+            </div>
         </div>
         <div id="middle">
             <table></table>
@@ -40,6 +54,10 @@
             </form>
         </div>
     </div>
+
+    <!-- The Modal -->
+    <div id="qrcode"></div>
+
 </body>
 
 </html>

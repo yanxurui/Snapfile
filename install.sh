@@ -19,7 +19,7 @@ cwd=$(pwd)
 ln -sf $cwd/nginx.conf /etc/nginx/conf.d/snapfile.conf
 ln -sf $cwd/supervisord.ini /etc/supervisord.d/snapfile.ini
 sed -i 's|appendonly no|appendonly yes|' /etc/redis.conf
-sed -i 's|dir /var/lib/redis|dir /var/www/snapfile/db|' /etc/redis.conf
+sed -i "s|dir .*|dir ${prefix}/db|" /etc/redis.conf
 
 cd $prefix
 mkdir -p files

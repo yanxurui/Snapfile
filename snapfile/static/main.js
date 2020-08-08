@@ -150,6 +150,12 @@ $(function() {
         // the drawback is that event callbacks registered on these dom before will disappear
     }
 
+    $('#dropdown').click(function() {
+        console.log('yes');
+        $('#toggle').toggleClass('on');
+        $('#menu').slideToggle();
+    });
+
     send.on('click', function() {
         var text = textarea.val();
         if (text) {
@@ -166,7 +172,7 @@ $(function() {
         return false;
     });
 
-    // register logout event
+    // register logout button
     $('#logout').on('click', function() {
         disconnect();
         // $.post('/logout'); does not redirect properly
@@ -179,7 +185,25 @@ $(function() {
         localStorage.removeItem("identity");
         return false;
     });
-    
+
+    // register share button
+    var modal = $("#qrcode");
+    // close when the user clicks anywhere
+    modal.click(function(event) {
+        if ($(event.target)[0] == modal[0]) {
+            modal.removeClass("on");
+        }
+    });
+    $('#share').on('click', function() {
+        if (modal.is(':empty')) {
+            const params = new URLSearchParams({
+                identity: localStorage.getItem("identity")
+            });
+            new QRCode(document.getElementById("qrcode"), window.location.origin + '/login?' + params.toString());
+        }
+        modal.addClass("on");
+    });
+
     connect(); // connect immediately
     // ======END======
 
