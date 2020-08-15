@@ -57,29 +57,41 @@
     <script src="https://cdn.jsdelivr.net/npm/sjcl@1.0.8/sjcl.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.min.js"></script>
     <script>
+        function sha256(input) {
+            // var myBitArray = sjcl.hash.sha256.hash(input);
+            // return sjcl.codec.hex.fromBits(myBitArray);
+            return input;
+        }
+
+        function login(passcode) {
+            $.ajax({
+                type: 'POST',
+                url: '/login',
+                data: { identity: sha256(passcode)},
+                statusCode: {
+                    200: function () {
+                        localStorage.setItem("identity", passcode);
+                        window.location = '/';
+                    },
+                    401: function () {
+                        alert('Wrong passcode or expired!');
+                    }
+                }
+            });
+        }
+
+        // login in by shared link immediately
+        const urlParams = new URLSearchParams(window.location.search);
+        var passcode = urlParams.get('identity');
+        if (passcode) {
+            login(passcode);
+        }
+
         $(function() {
-            function sha256(input) {
-                // var myBitArray = sjcl.hash.sha256.hash(input);
-                // return sjcl.codec.hex.fromBits(myBitArray);
-                return input;
-            }
             $('#login').on('submit', function(e) {
                 var passcode = $(this).find('input[name="identity"]').val();
                 if (passcode) {
-                    $.ajax({
-                        type: 'POST',
-                        url: '/login',
-                        data: { identity: sha256(passcode)},
-                        statusCode: {
-                            200: function () {
-                                localStorage.setItem("identity", passcode);
-                                window.location = '/';
-                            },
-                            401: function () {
-                                alert('Wrong passcode or expired!');
-                            }
-                        }
-                    });
+                    login(passcode);
                 }
                 return false;
             });

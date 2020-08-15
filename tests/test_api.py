@@ -171,10 +171,6 @@ class TestLogin(BaseTestCase):
         self.assertEqual(r.status_code, 302)
         self.assertTrue('/login.html' in r.headers['Location'])
 
-    def test_login_by_shared_link(self):
-        r = self.r('get', '/login', params={'identity': self.i})
-        self.assertEqual(r.status_code, 200)
-
 
 class TestMessaging(BaseTestCase):
     def test_send(self):

@@ -38,7 +38,6 @@ def init_app():
         web.get('/ws', ws),
         web.post('/signup', signup),
         web.post('/login', login),
-        web.get('/login', login), # for shared link
         web.post('/logout', logout),
         web.get('/auth', allow),
         web.post('/files', upload),

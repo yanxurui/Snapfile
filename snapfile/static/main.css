@@ -121,7 +121,7 @@ form#file {
 }
 
 
-/* ---Dropdown menu Begin--- */
+/* ---BEGIN Dropdown Menu BEGIN--- */
 #dropdown {
     position: relative;
 }
@@ -204,7 +204,6 @@ li a:focus {
   display: none; /* Hidden by default */
   position: fixed; /* Stay in place */
   z-index: 1; /* Sit on top */
-  padding-top: 100px; /* Location of the box */
   left: 0;
   top: 0;
   width: 100%; /* Full width */
@@ -214,12 +213,9 @@ li a:focus {
 }
 
 #qrcode.on {
-    display: block;
+  display: flex;
+  justify-content: center; /* align horizontal */
+  align-items: center; /* align vertical */
 }
 
-#qrcode img {
-    display: block;
-    max-width: 100%;
-    margin: 0 auto;
-}
-/* ---Dropdown menu End---*/
+/* ---END Dropdown Menu END---*/

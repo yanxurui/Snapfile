@@ -188,7 +188,7 @@ $(function() {
 
     // register share button
     var modal = $("#qrcode");
-    // close when the user clicks anywhere
+    // close when the user clicks anywhere outside the image
     modal.click(function(event) {
         if ($(event.target)[0] == modal[0]) {
             modal.removeClass("on");
@@ -199,7 +199,7 @@ $(function() {
             const params = new URLSearchParams({
                 identity: localStorage.getItem("identity")
             });
-            new QRCode(document.getElementById("qrcode"), window.location.origin + '/login?' + params.toString());
+            new QRCode(document.getElementById("qrcode"), window.location.origin + '/login.html?' + params.toString());
         }
         modal.addClass("on");
     });
