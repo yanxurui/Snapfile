@@ -59,6 +59,7 @@ some default configuration
 ### Deploy in production mode (CentOS)
 Change the `prefix` and `user` in `install.sh` and then run it using root
 ```sh
+git pull
 bash install.sh
 ```
 

@@ -41,13 +41,28 @@ $(function() {
     var textarea = $('textarea');
     var send = $('input#send_message');
 
+    var expression = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi;
+    var regex = new RegExp(expression);
+
     // display a single message
     function display(msg) {
         var tr = $('<tr>');
         if (msg.type == 0) {
             // TEXT
-            // use text instead of html to avoid xss attack
-            tr.append($('<td colspan="2">').text(msg.data));
+            var td = $('<td colspan="2">');
+            if (msg.data.match(regex)) {
+                // create a link for the url
+                var a = $('<a />');
+                a.attr('target', '_blank');
+                a.attr('href', msg.data);
+                a.text(msg.data);
+                td.html(a);
+            }
+            else {
+                // use text instead of html to avoid xss attack
+                td.text(msg.data);
+            }
+            tr.append(td);
         }
         else if (msg.type == 1) {
             //  FILE
