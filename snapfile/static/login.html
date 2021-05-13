@@ -113,7 +113,7 @@
                         data: {identity: hashed_passcode},
                         statusCode: {
                             201: function () {
-                                alert("Please save your passcode: " + passcode);
+                                // alert("Please save your passcode: " + passcode);
                                 localStorage.setItem("identity", passcode);
                                 window.location = '/';
                             },
