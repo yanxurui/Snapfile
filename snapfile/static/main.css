@@ -218,4 +218,17 @@ li a:focus {
   align-items: center; /* align vertical */
 }
 
+.popup {
+    display: none;
+    color: #fff;
+    background-color: #555;
+    text-align: center;
+    border-radius: 4px;
+    padding: 5px 10px;
+    position: absolute;
+    z-index: 1;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+}
 /* ---END Dropdown Menu END---*/

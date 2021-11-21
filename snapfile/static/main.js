@@ -3,6 +3,10 @@ function updateScroll(){
     element.scrollTop = element.scrollHeight;
 }
 
+function popup(msg) {
+    $(".popup").text(msg).fadeIn().delay(2000).fadeOut();
+}
+
 // js string format
 // checkout https://stackoverflow.com/a/18234317/6088837
 String.prototype.formatUnicorn = String.prototype.formatUnicorn ||
@@ -23,6 +27,7 @@ function () {
 
     return str;
 };
+
 // convert date to month-day Hour:Minute
 function formatDate(date) {
     var hours = date.getHours();
@@ -166,7 +171,6 @@ $(function() {
     }
 
     $('#dropdown').click(function() {
-        console.log('yes');
         $('#toggle').toggleClass('on');
         $('#menu').slideToggle();
     });
@@ -210,11 +214,25 @@ $(function() {
         }
     });
     $('#share').on('click', function() {
-        if (modal.is(':empty')) {
-            const params = new URLSearchParams({
-                identity: localStorage.getItem("identity")
+        const params = new URLSearchParams({
+            identity: localStorage.getItem("identity")
+        });
+        var url = window.location.origin + '/login.html?' + params.toString();
+
+        // Step 1: copy the link to clipboard
+        navigator.clipboard.writeText(url).then(
+            function() {
+                popup('Link copied!');
+                console.log('Async: Copying to clipboard was successful!');
+            },
+            function(err) {
+                popup('Failed to copy link!');
+                console.error('Async: Could not copy text: ', err);
             });
-            new QRCode(document.getElementById("qrcode"), window.location.origin + '/login.html?' + params.toString());
+
+        // Step 2: generate a qr code
+        if (modal.is(':empty')) {
+            new QRCode(document.getElementById("qrcode"), url);
         }
         modal.addClass("on");
     });
