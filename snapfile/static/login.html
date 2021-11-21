@@ -67,7 +67,7 @@
             $.ajax({
                 type: 'POST',
                 url: '/login',
-                data: { identity: sha256(passcode)},
+                data: { identity: sha256(passcode.toLowerCase())},
                 statusCode: {
                     200: function () {
                         localStorage.setItem("identity", passcode);

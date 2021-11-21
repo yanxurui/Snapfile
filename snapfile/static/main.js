@@ -99,7 +99,7 @@ $(function() {
                     // new Date from isoformat
                     // format to m-d HH:MM
                     info.expire_at = formatDate(new Date(info.expire_at));
-                    info.identity = localStorage.getItem("identity");
+                    info.identity = localStorage.getItem("identity").toUpperCase();
                     update_status(info);
                     conn.send(JSON.stringify({
                         action: 'pull',
