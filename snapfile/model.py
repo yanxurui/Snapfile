@@ -178,7 +178,7 @@ class Folder:
             file_id)
 
     async def gen_file_id(self):
-        """Generate the relative path of a new file
+        """Generate a new file id
         """
         file_id = await redis.incr('#files:{}'.format(self.identity))
         return str(file_id)

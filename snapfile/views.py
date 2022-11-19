@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import logging
+import mimetypes
 from pprint import pprint
 from functools import wraps
 from datetime import datetime
@@ -231,11 +232,38 @@ async def upload(request):
 async def download(request):
     folder = await check_authorized(request)
     file_id = request.query['id']
-    pretty_name = request.query['name'] # we can not query the filename by file id in server side
-    resp = web.Response(headers={
-        'Content-Disposition': 'attachment; filename="{0}"'.format(pretty_name),
-        'X-Accel-Redirect': '/download/{}'.format(folder.get_file_path(file_id))
-        })
-    return resp
+    file_name = request.query['name'] # we can not query the filename by file id in server side
+    file_path = folder.get_file_path(file_id)
+    if config.DOWNLOAD_VIA_NGINX:
+        resp = web.Response(headers={
+            'Content-Disposition': 'attachment; filename="{0}"'.format(file_name),
+            'X-Accel-Redirect': '/download/{}'.format(file_path)
+            })
+        log.info('redirect to NGINX')
+        return resp
+    else:
+        ct, encoding = mimetypes.guess_type(file_name)
+        if not ct:
+            ct = "application/octet-stream"
+        resp = web.StreamResponse(
+            headers={
+                'Content-Type': ct,
+                'Content-Disposition': 'attachment; filename="{0}"'.format(file_name),
+                # 'Content-Length': str(l)
+            },
+        )
+        await resp.prepare(request)
+        log.info('start streaming file...')
+        chunk_size = 1024*1024
+        file_path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, file_path)
+        with open(file_path, 'rb') as file:
+            while True:
+                chunk = file.read(chunk_size)
+                if not chunk:
+                    break
+                await resp.write(chunk)
+        await resp.write_eof()
+        log.info('end streaming file')
+        return resp
 
 

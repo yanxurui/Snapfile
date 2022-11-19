@@ -101,9 +101,7 @@ keys:
 
 * `#files:<folder identity>` int: the last file id in a given folder
 * `folder:<folder identity>` str: meta data of a folder serialized in json format, like created time, quota, size, etc
-* `messages::<folder identity>` list: messages serialized in json format
-
-Note we don't store file meta data for now.
+* `messages::<folder identity>` list: messages (including file meta data) serialized in json format
 
 ### Supervisord
 manage the lifecycle of the service
