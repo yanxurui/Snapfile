@@ -12,6 +12,9 @@ An anonymous file transfer application that enables you to access files from any
 
 
 ## Change log
+### Version 0.4
+* encryption & decryption
+
 ### Version 0.3
 * drag&drop to upload files
 

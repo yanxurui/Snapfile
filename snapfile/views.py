@@ -242,7 +242,7 @@ async def download(request):
     file_id = request.query['id']
     file_name = request.query['name'] # we can not query the filename by file id in server side
     file_path = folder.get_file_path(file_id)
-    if config.DOWNLOAD_VIA_NGINX:
+    if not config.ENABLE_ENCRYPTION:
         resp = web.Response(headers={
             'Content-Disposition': 'attachment; filename="{0}"'.format(file_name),
             'X-Accel-Redirect': '/download/{}'.format(file_path)
@@ -261,13 +261,13 @@ async def download(request):
             },
         )
         await resp.prepare(request)
-        log.info('start streaming file...')
+        log.info('start streaming file: {0}'.format(file_name))
         chunk_size = 1024*1024
         file_path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, file_path)
         with open(file_path, 'rb') as file:
             if config.ENABLE_ENCRYPTION:
                 nonce = file.read(16)
-                cipher = folder.get_cipher(nonce)
+                cipher, _ = folder.get_cipher(nonce)
                 decryptor = cipher.decryptor()
             while True:
                 chunk = file.read(chunk_size)
