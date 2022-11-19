@@ -5,8 +5,10 @@ An anonymous file transfer application that enables you to access files from any
 
 ## Features
 * anonymous chat room
-* file transfer across any devices
-* expires after one day
+* file transfer across any devices where a modern browswer is available
+* secure:
+    * all user data (messages and files) will be encrypted. Since passcode is never persisted in the server side, no one except the owner can decrypt the data
+    * expires automatically after one day
 
 
 ## Change log
@@ -126,10 +128,17 @@ python -m unittest -v test_api.py
 * select db 0 of Redis
 * clean all data at startup
 
+some known issues:
+
 The error below is due to a bug in package requests: [Revert PR 1440, do not modify cookie value by yanxurui · Pull Request #5459 · psf/requests](https://github.com/psf/requests/pull/5459)
 
 ```
 json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+```
+
+There might be a chance that test_api.TestExpire fails because the orphan process is cleang the data.
+```
+AssertionError: '1 folders found and 0 folders deleted' not found in 'xxx
 ```
 
 #### test_nginx.py

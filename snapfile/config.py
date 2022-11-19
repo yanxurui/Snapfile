@@ -11,6 +11,7 @@ UPLOAD_ROOT_DIRECTORY = './upload'
 # a Folder will be placed in a random second level directory named from 1 to 1024 under UPLOAD_ROOT_DIRECTORY
 UPLOAD_SECOND_DIRECTORY_RANGE = 2**10
 DOWNLOAD_VIA_NGINX = True
+ENABLE_ENCRYPTION = True
 DELETE_INTERVAL = 24*60*60 # seconds i.e., daily
 HEARTBEAT = 30 # seconds
 RECEIVE_TIMEOUT = 3600 # 1 hour
@@ -26,10 +27,10 @@ if ENV == 'PROD':
     LOG_FILE = None # rely on supervisord to manage log rotation
     UPLOAD_ROOT_DIRECTORY = '/var/www/snapfile/files'
 elif ENV == 'TEST':
-    AGE = 6
+    AGE = 8
     LOG_FILE = 'test.log'
     STORAGE_PER_FOLDER = 10**6 # 1 MB
-    DELETE_INTERVAL = 4
+    DELETE_INTERVAL = 6
 else: # DEV
     DOWNLOAD_VIA_NGINX = False
     DELETE_INTERVAL = 60

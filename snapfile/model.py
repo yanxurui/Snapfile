@@ -16,6 +16,10 @@ import aiohttp
 from aiohttp import web
 from concurrent.futures import ThreadPoolExecutor
 
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
 from . import config
 
 log = logging.getLogger(__name__)
@@ -117,14 +121,15 @@ class Message(dict):
 class Folder:
     def __init__(self,
                  identity,
+                 encryption_key=None,
                  created_time=None,
                  age=None,
                  storage_limit=config.STORAGE_PER_FOLDER,
                  current_size=0,
                  path=None,
                  **kwargs):
-        self.passcode = None
         self.identity = identity
+        self.encryption_key = encryption_key
         self.created_time = datetime.now(timezone.utc).isoformat() if created_time is None else created_time
         self.age = config.AGE if age is None else age
         self.storage_limit = storage_limit
@@ -166,7 +171,7 @@ class Folder:
         """
         o = dict(self.__dict__)
         del o['connections']
-        del o['passcode']
+        del o['encryption_key']
         return json.dumps(o)
 
     def get_file_path(self, file_id=None):
@@ -184,13 +189,11 @@ class Folder:
         file_id = await redis.incr('#files:{}'.format(self.identity))
         return str(file_id)
 
-    @staticmethod
-    def _keys(identity):
-        return 'folder:%s' % identity, 'messages:%s' % identity
-
-    @staticmethod
-    def _hash(identity):
-        return hashlib.sha1(identity.encode('utf-8')).hexdigest()[:10]
+    def get_cipher(self, nonce=None):
+        if nonce is None:
+            nonce = os.urandom(16)
+        algorithm = algorithms.ChaCha20(self.encryption_key, nonce)
+        return Cipher(algorithm, mode=None), nonce
 
     def connect(self, ws):
         self.connections.add(ws)
@@ -206,6 +209,12 @@ class Folder:
     async def save(self, msg):
         """Save the message in this folder
         """
+        if config.ENABLE_ENCRYPTION:
+            msg = Message(**msg)
+            cipher, nonce = self.get_cipher()
+            encryptor = cipher.encryptor()
+            data_b = nonce + encryptor.update(msg.data.encode('utf-8'))
+            msg.data = base64.b64encode(data_b).decode('ascii') # convert to str to fit in json. https://stackoverflow.com/a/40000564
         folder_key, msg_key = self._keys(self.identity)
         async with redis.pipeline(transaction=True) as tr:
             # enqueue: "If key does not exist, it is created as empty"
@@ -257,8 +266,40 @@ class Folder:
         # but the client holds messages belonging to the old folder
         # this should be fine because lrange will return an empty list
         msgs_json = await redis.lrange(msg_key, offset, -1)
-        return [Message(**json.loads(m)) for m in msgs_json]
+        results = []
+        for m in msgs_json:
+            msg = Message(**json.loads(m))
+            if config.ENABLE_ENCRYPTION:
+                data_b = base64.b64decode(msg.data)
+                nonce = data_b[:16]
+                cipher, nonce = self.get_cipher(nonce)
+                decryptor = cipher.decryptor()
+                msg.data = decryptor.update(data_b[16:]).decode('utf-8')
+            # unfortunately, we could not use generator here: TypeError: object async_generator can't be used in 'await' expression
+            results.append(msg)
+        return results
   
+    @staticmethod
+    def _keys(identity):
+        return 'folder:%s' % identity, 'messages:%s' % identity
+
+    @staticmethod
+    def _hash(identity):
+        return hashlib.sha1(identity.encode('utf-8')).hexdigest()[:10]
+
+    @staticmethod
+    def _gen_encryption_key(passcode):
+        """generate a 32-byte key used for symmethric encryption
+        """
+        salt = os.urandom(16)
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=480000,
+        )
+        return kdf.derive(passcode.encode('utf-8'))
+
     @classmethod
     async def create(cls, passcode, age=None):
         identity = cls._hash(passcode)
@@ -281,7 +322,7 @@ class Folder:
         identity = cls._hash(passcode) # the raw passcode is never persisted
         folder = await cls.open(identity)
         if folder is not None:
-            folder.passcode = passcode
+            folder.encryption_key = cls._gen_encryption_key(passcode)
         return folder
 
     @classmethod

@@ -3,6 +3,8 @@ import sys
 import json
 import logging
 import mimetypes
+import struct
+
 from pprint import pprint
 from functools import wraps
 from datetime import datetime
@@ -188,8 +190,7 @@ async def upload(request):
             # no file is selected
             continue
         if request.headers.get('Content-Length') is None or request.headers.get('Transfer-Encoding') is not None:
-            # I am not going to support chunked encoding
-            # Do not rely on Content-Length if transfer is chunked.
+            # We rely on Content-Length since chunked transfer encoding is not suitable here
             raise web.HTTPBadRequest()
         l = int(request.headers['Content-Length'])
         if l + folder.current_size > folder.storage_limit:
@@ -202,6 +203,10 @@ async def upload(request):
         size = 0
         try:
             with open(file_path, 'wb') as f:
+                if config.ENABLE_ENCRYPTION:
+                    cipher, nonce = folder.get_cipher()
+                    encryptor = cipher.encryptor()
+                    f.write(nonce)
                 while True:
                     chunk = await field.read_chunk(1024*1024)  # 8192 bytes by default.
                     if not chunk:
@@ -209,7 +214,10 @@ async def upload(request):
                         break
                     size += len(chunk)
                     log.debug('writing {} for {} ...'.format(len(chunk), filename[:30]))
+                    if config.ENABLE_ENCRYPTION:
+                        chunk = encryptor.update(chunk)
                     f.write(chunk) # block op
+                assert l >= size, 'Content-Length is larger than the file size'
         except:
             # if client abort uploading
             # asyncio.exceptions.CancelledError will be captured here
@@ -249,7 +257,7 @@ async def download(request):
             headers={
                 'Content-Type': ct,
                 'Content-Disposition': 'attachment; filename="{0}"'.format(file_name),
-                # 'Content-Length': str(l)
+                # 'Content-Length': str() # use chunked transfer encoding
             },
         )
         await resp.prepare(request)
@@ -257,10 +265,16 @@ async def download(request):
         chunk_size = 1024*1024
         file_path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, file_path)
         with open(file_path, 'rb') as file:
+            if config.ENABLE_ENCRYPTION:
+                nonce = file.read(16)
+                cipher = folder.get_cipher(nonce)
+                decryptor = cipher.decryptor()
             while True:
                 chunk = file.read(chunk_size)
                 if not chunk:
                     break
+                if config.ENABLE_ENCRYPTION:
+                    chunk = decryptor.update(chunk)
                 await resp.write(chunk)
         await resp.write_eof()
         log.info('end streaming file')

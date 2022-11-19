@@ -310,9 +310,9 @@ class TestExpire(BaseTestCase):
     def test_login(self):
         c1 = self.ws()
         c2 = self.ws()
-        sleep(4.5)
+        sleep(6.5)
         self.checkLog('1 folders found and 0 folders deleted')
-        # expired after 6 seconds
+        # expired after 8 seconds
         sleep(2)
         r = self.s.get('/files')
         self.assertEqual(r.status_code, 401)
@@ -323,7 +323,7 @@ class TestExpire(BaseTestCase):
         opcode, frame = c1.recv_data()
         self.assertEqual(opcode, websocket.ABNF.OPCODE_CLOSE)
         self.assertIn(b'Expired', frame)
-        sleep(2)
+        sleep(4)
         # folder should be deleted now
         self.checkLog('1 folders deleted')
         opcode, frame = c2.recv_data()
