@@ -42,14 +42,14 @@ async def login(cache, passcode):
     Since there is no user concept in this app, the hash of the folder id (passcode) is
     treated as identity for simplicity.
     """
-    identity = passcode
-    folder = await Folder.open(identity)
+    folder = await Folder.login(passcode)
     if folder is None:
         log.warning('wrong identity')
         raise web.HTTPUnauthorized()
     if folder.expired:
         log.warning('folder expired')
         raise web.HTTPUnauthorized()
+    identity = folder.identity
     if identity not in cache:
         # do not overwrite the cache because otherwise it will lose previous connections
         cache[identity] = folder
