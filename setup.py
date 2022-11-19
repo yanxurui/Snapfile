@@ -31,10 +31,10 @@ setup(
     # List run-time dependencies here. These will be installed by pip when
     # your project is installed.
     install_requires=[
-        'aiohttp',
-        'aiohttp-security',
-        'aiohttp-session',
-        'aioredis',
+        'aiohttp==3.6.2',
+        'aiohttp-security==0.4.0',
+        'aiohttp-session==2.9.0',
+        'aioredis==2.0.1',
         'user_agents'
     ],
 
@@ -43,7 +43,7 @@ setup(
     # pip to create the appropriate form of executable for the target platform.
     entry_points={
         'console_scripts': [
-            'snapfile=snapfile.main:main',
+            'snapfile=snapfile.__main__:main',
         ],
     },
 )

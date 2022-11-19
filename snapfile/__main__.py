@@ -42,11 +42,11 @@ def init_app():
         web.get('/auth', allow),
         web.post('/files', upload),
         web.get('/files', download),
-        # below are static files that should be served by NGINX
         web.get('/', index, name='index'), # static does not support redirect / to /index.html
         web.get('/index.html', index), # serve a single static file with auth
+        # below are static files that should be served by NGINX
         web.static('/', os.path.join(dir_path, 'static'), name='static')]) # handle static files such as html, js, css
-    
+
     return app
 
 

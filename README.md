@@ -63,7 +63,7 @@ git pull
 bash install.sh
 ```
 
-The directory structure of /var/www/snapfile
+The directory structure of `prefix`(/var/www/snapfile for example)
 ```
 `-- snapfile
     |-- db
@@ -86,9 +86,37 @@ The directory structure of /var/www/snapfile
         `-- test.html
 ```
 
-## Test
 
-### test_api.py
+## Development
+
+### NGINX
+
+1. serve static files, such as html, css, etc
+2. handle download efficiently
+3. prevent from brute force attack
+4. sharing port 443 with other services and forwarding to the backend (python web app in our case)
+
+### Redis
+keys:
+
+* `#files:<folder identity>` int: the last file id in a given folder
+* `folder:<folder identity>` str: meta data of a folder serialized in json format, like created time, quota, size, etc
+* `messages::<folder identity>` list: messages serialized in json format
+
+Note we don't store file meta data for now.
+
+### Supervisord
+manage the lifecycle of the service
+To restart the service, run the command below as root:
+```
+supervisorctl restart snapfile
+```
+
+### Test
+
+need to install packages: websocket-client
+
+#### test_api.py
 Functional test for APIs of python backend:
 using the classical python unittest
 ```sh
@@ -100,8 +128,14 @@ python -m unittest -v test_api.py
 * select db 0 of Redis
 * clean all data at startup
 
-### test_nginx.py
+The error below is due to a bug in package requests: [Revert PR 1440, do not modify cookie value by yanxurui · Pull Request #5459 · psf/requests](https://github.com/psf/requests/pull/5459)
+
+```
+json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+```
+
+#### test_nginx.py
 Functional test for NGINX config in a production environment.
 
-### benchmark.py
+#### benchmark.py
 stress test for aiohttp.

@@ -44,7 +44,7 @@ class BaseTestCase(unittest.TestCase):
     def setUpClass(cls):
         if os.path.isfile(LOG):
             os.remove(LOG)
-        cmd = 'cd .. && ENV=TEST exec python -m snapfile.main -u'
+        cmd = 'cd .. && ENV=TEST exec python -m snapfile -u'
         p = subprocess.Popen(
             cmd,
             # stdin=open(os.devnull),

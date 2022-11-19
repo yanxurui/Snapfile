@@ -40,7 +40,7 @@ sudo -i -u $user <<EOF
 
     cd $cwd
     pyenv local $pyversion
-    pip install -e .
+    pip install . -e
 EOF
 
 # NGINX 403 due to permission issue, check

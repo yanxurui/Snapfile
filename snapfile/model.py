@@ -39,8 +39,9 @@ async def remove_expired_folders(app):
             started_time = time()
             log.info('start removing expired folders')
             total, deleted = 0, 0
-            keys = await redis.keys('folder:*', encoding='utf-8')
+            keys = await redis.keys('folder:*')
             for k in keys:
+                k = k.decode("utf-8")
                 identity = k[k.find(':')+1:]
                 total += 1
                 f = app['folders'].get(identity, None)
@@ -74,9 +75,7 @@ async def remove_expired_folders(app):
 
 async def startup(app):
     global redis
-    # use default db 0 for test purpose
-    db = 1 if config.PROD else 0
-    redis = await aioredis.create_redis_pool(config.REDIS_ADDRESS, db=db)
+    redis = await aioredis.from_url(config.REDIS_ADDRESS, db=config.REDIS_DB)
     if not config.PROD:
         await redis.flushdb()
         delete(config.UPLOAD_ROOT_DIRECTORY)
@@ -203,16 +202,16 @@ class Folder:
         """Save the message in this folder
         """
         folder_key, msg_key = self._keys(self.identity)
-        tr = redis.multi_exec()
-        # enqueue: "If key does not exist, it is created as empty"
-        tr.rpush(msg_key, json.dumps(msg))
-        # upload storage size
-        self.current_size += msg.size
-        tr.set(folder_key, self.serialize())
-        ok1, ok2 = await tr.execute()
-        if not (ok1 and ok2):
-            log.error('transaction failed')
-            return False
+        async with redis.pipeline(transaction=True) as tr:
+            # enqueue: "If key does not exist, it is created as empty"
+            tr.rpush(msg_key, json.dumps(msg))
+            # upload storage size
+            self.current_size += msg.size
+            tr.set(folder_key, self.serialize())
+            ok1, ok2 = await tr.execute()
+            if not (ok1 and ok2):
+                log.error('transaction failed')
+                return False
         return True
 
     async def send(self, msg):
@@ -252,7 +251,7 @@ class Folder:
         # offset > total occurs when the folder (identified by the id) is renewed (still empty) in the server
         # but the client holds messages belonging to the old folder
         # this should be fine because lrange will return an empty list
-        msgs_json = await redis.lrange(msg_key, offset, -1, encoding='utf-8')
+        msgs_json = await redis.lrange(msg_key, offset, -1)
         return [Message(**json.loads(m)) for m in msgs_json]
   
     @classmethod
@@ -274,7 +273,7 @@ class Folder:
     @classmethod
     async def open(cls, identity):
         folder_key, _ = cls._keys(identity)
-        folder_json = await redis.get(folder_key, encoding='utf-8')
+        folder_json = await redis.get(folder_key)
         if folder_json:
             folder_dict = json.loads(folder_json)
             return Folder(**folder_dict)
