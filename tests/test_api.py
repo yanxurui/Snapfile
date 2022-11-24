@@ -287,19 +287,23 @@ class TestFileUpload(BaseTestCase):
 
     def test_download(self):
         c = self.ws()
+        file_content = 'I am in a file'
+        content_length = len(file_content)
         files = [
-            ('myfile[]', ('small.txt', 'I am in a file')),
+            ('myfile[]', ('small.txt', file_content)),
         ]
         r = self.s.post('/files', files=files)
         self.assertEqual(r.status_code, 200)
         m = self.recv(c, file=True)
         r = self.s.get('/files', params={'id':m['file_id'], 'name': m['data']})
         self.assertEqual(r.status_code, 200)
-        self.assertIn('X-Accel-Redirect', r.headers)
+        # self.assertIn('X-Accel-Redirect', r.headers)
+        self.assertEqual(int(r.headers['content-length']), content_length)
+        self.assertEqual(r.content.decode(), file_content)
 
     def test_download_404(self):
         r = self.s.get('/files', params={'id':999, 'name': 'does not exist.txt'})
-        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.status_code, 404)
         # NGINX will return 404
 
     def test_upload_out_of_space(self):

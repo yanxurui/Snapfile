@@ -266,7 +266,11 @@ async def download(request):
         # Without setting Content-Length, chunked transfer encoding will be used.
         # The downside is that the client has no way to estimate the ETA
         # So, let's infer the Content-Length from the file size
-        file_size = os.path.getsize(file_path) - 16
+        try:
+            file_size = os.path.getsize(file_path) - 16
+        except FileNotFoundError:
+            # this is probably a bad request with an arbitrary file id
+            raise web.HTTPNotFound()
         resp.content_length = file_size
         await resp.prepare(request)
         log.info('start downloading file: %s', file_name)
