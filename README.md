@@ -11,27 +11,6 @@ An anonymous file transfer application that enables you to access files from any
     * expires automatically after one day
 
 
-## Change log
-### Version 0.4
-* encryption & decryption
-
-### Version 0.3
-* drag&drop to upload files
-
-### Version 0.2
-* better at handle disconnection
-* cancel uploading file
-
-### Version 0.1
-* instant messaging is implemented by websocket
-* 2 messge types: text and file: text body and file name are stored in the data field of a message 
-* upload
-	* each folder has a corresponding path in the server where files uploaded to this folder are stored
-	* uploading is handled directly in Python
-* download: files are served by NGINX using `X-accel`
-* backend only uses a single thread in Python
-
-
 ## Install & Run
 
 ### Getting started quickly
@@ -93,6 +72,11 @@ The directory structure of `prefix`(/var/www/snapfile for example)
 
 
 ## Development
+
+### AIOHttp
+This is a web app based on aiohttp (built on top of asyncio) which is an asynchronous http libaray. That means, its networking operations are non-blocking and all http requests can be processed in a concurrent manner in a single thread. So far, it's the best choice in the Python world for constructing a high performance web server.
+
+It supports websocket (long connection) which allows to implement the instant messaging or chat very easily.
 
 ### NGINX
 

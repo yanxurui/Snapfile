@@ -1,0 +1,18 @@
+Version 0.4 (2022.11.22)
+* encryption & decryption
+
+Version 0.3
+* drag&drop to upload files
+
+Version 0.2
+* better at handle disconnection
+* cancel uploading file
+
+Version 0.1
+* instant messaging is implemented by websocket
+* 2 messge types: text and file: text body and file name are stored in the data field of a message 
+* upload
+	* each folder has a corresponding path in the server where files uploaded to this folder are stored
+	* uploading is handled directly in Python
+* download: files are served by NGINX using `X-accel`
+* backend only uses a single thread in Python
