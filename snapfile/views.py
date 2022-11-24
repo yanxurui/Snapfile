@@ -35,6 +35,8 @@ def get_client_display_name(request):
 async def signup(request):
     form_data = await request.post()
     identity = form_data['identity']
+    if len(identity) > 32:
+        raise web.HTTPBadRequest()
     age = form_data.get('age')
     await Folder.create(identity, age)
     identity = await auth.login(request.app['folders'], identity)
@@ -190,7 +192,7 @@ async def upload(request):
             # no file is selected
             continue
         if request.headers.get('Content-Length') is None or request.headers.get('Transfer-Encoding') is not None:
-            # We rely on Content-Length since chunked transfer encoding is not suitable here
+            # We can safely assume Content-Length is always available since chunked transfer encoding is not suitable for uploading a file with fixed size
             raise web.HTTPBadRequest()
         l = int(request.headers['Content-Length'])
         if l + folder.current_size > folder.storage_limit:
@@ -217,7 +219,7 @@ async def upload(request):
                     if config.ENABLE_ENCRYPTION:
                         chunk = encryptor.update(chunk)
                     f.write(chunk) # block op
-                assert l >= size, 'Content-Length is larger than the file size'
+                assert l >= size, 'Content-Length is usually larger than the file size'
         except:
             # if client abort uploading
             # asyncio.exceptions.CancelledError will be captured here
@@ -257,13 +259,17 @@ async def download(request):
             headers={
                 'Content-Type': ct,
                 'Content-Disposition': 'attachment; filename="{0}"'.format(file_name),
-                # 'Content-Length': str() # use chunked transfer encoding
             },
         )
-        await resp.prepare(request)
-        log.info('start streaming file: {0}'.format(file_name))
         chunk_size = 1024*1024
         file_path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, file_path)
+        # Without setting Content-Length, chunked transfer encoding will be used.
+        # The downside is that the client has no way to estimate the ETA
+        # So, let's infer the Content-Length from the file size
+        file_size = os.path.getsize(file_path) - 16
+        resp.content_length = file_size
+        await resp.prepare(request)
+        log.info('start downloading file: %s', file_name)
         with open(file_path, 'rb') as file:
             if config.ENABLE_ENCRYPTION:
                 nonce = file.read(16)
@@ -273,11 +279,12 @@ async def download(request):
                 chunk = file.read(chunk_size)
                 if not chunk:
                     break
+                log.debug('send %d bytes for %s', len(chunk), file_name)
                 if config.ENABLE_ENCRYPTION:
                     chunk = decryptor.update(chunk)
                 await resp.write(chunk)
         await resp.write_eof()
-        log.info('end streaming file')
+        log.info('finish downloading file %s', file_name)
         return resp
 
 

@@ -284,8 +284,18 @@ class Folder:
         return 'folder:%s' % identity, 'messages:%s' % identity
 
     @staticmethod
-    def _hash(identity):
-        return hashlib.sha1(identity.encode('utf-8')).hexdigest()[:10]
+    def _gen_hash(identity):
+        '''Given the passcode, generate a hash
+        For security, we don't store user's passcode in the server since passcode
+        is used to derive the key to encrypt messages and files.
+        The key derivation method (PBKDF2HMAC-SHA256) we are using only relies
+        on SHA256(passcode). Therefore, we must use a different cryptography
+        hash function here. We adopt SHA3-256 as it uses a completely different struction
+        from the SHA-256.
+        Also, we only pick 16 chars from the hexdigest of length 64. This makes it
+        even harder to exploit.
+        '''
+        return hashlib.sha3_256(identity.encode('utf-8')).hexdigest()[0:-1:4]
 
     @staticmethod
     def _gen_encryption_key(passcode):
@@ -302,7 +312,7 @@ class Folder:
 
     @classmethod
     async def create(cls, passcode, age=None):
-        identity = cls._hash(passcode)
+        identity = cls._gen_hash(passcode)
         if await cls._exists(identity):
             # Anti brute force must be employed to disable this exploitation
             raise web.HTTPConflict(text='Identity conflicts, please try again!')
@@ -319,7 +329,7 @@ class Folder:
 
     @classmethod
     async def login(cls, passcode):
-        identity = cls._hash(passcode) # the raw passcode is never persisted
+        identity = cls._gen_hash(passcode) # the raw passcode is never persisted
         folder = await cls.open(identity)
         if folder is not None:
             folder.encryption_key = cls._gen_encryption_key(passcode)

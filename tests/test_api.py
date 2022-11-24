@@ -158,6 +158,10 @@ class TestLogin(BaseTestCase):
         r = self.r('post', '/signup', data={'identity': self.i})
         self.assertEqual(r.status_code, 409) # conflict
 
+    def test_signup_passcode_too_long(self):
+        r = self.r('post', '/signup', data={'identity': '1'*33})
+        self.assertEqual(r.status_code, 400) # conflict
+
     def test_login(self):
         r = self.r('post', '/login', data={'identity': '1111111'})
         self.assertEqual(r.status_code, 401)
