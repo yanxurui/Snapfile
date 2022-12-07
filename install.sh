@@ -16,7 +16,7 @@ mkdir -p $prefix
 
 cwd=$(pwd)
 /bin/cp -Rf $cwd/snapfile/static $prefix
-ln -sf $cwd/nginx.conf /etc/nginx/conf.d/snapfile.conf
+ln -sf $cwd/snapfile.conf /etc/nginx/conf.d/snapfile.conf
 ln -sf $cwd/supervisord.ini /etc/supervisord.d/snapfile.ini
 sed -i 's|appendonly no|appendonly yes|' /etc/redis.conf
 sed -i "s|dir .*|dir ${prefix}/db|" /etc/redis.conf
