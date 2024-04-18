@@ -31,7 +31,7 @@ setup(
     # List run-time dependencies here. These will be installed by pip when
     # your project is installed.
     install_requires=[
-        'aiohttp==3.9.0',
+        'aiohttp==3.9.4',
         'aiohttp-security==0.4.0',
         'aiohttp-session==2.9.0',
         'aioredis==2.0.1',
