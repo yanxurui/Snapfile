@@ -36,7 +36,7 @@ setup(
         'aiohttp-session==2.9.0',
         'redis==5.1.0',
         'user_agents',
-        'cryptography==42.0.2'
+        'cryptography==42.0.4'
     ],
 
     # To provide executable scripts, use entry points in preference to the
