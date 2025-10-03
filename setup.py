@@ -16,6 +16,11 @@ setup(
     classifiers=[
         # Specify the Python versions you support here.
         'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
     ],
 
     # You can just specify the packages manually here if your project is
@@ -31,12 +36,12 @@ setup(
     # List run-time dependencies here. These will be installed by pip when
     # your project is installed.
     install_requires=[
-        'aiohttp==3.6.2',
-        'aiohttp-security==0.4.0',
-        'aiohttp-session==2.9.0',
-        'aioredis==2.0.1',
+        'aiohttp>=3.9.0',
+        'aiohttp-security>=0.5.0',
+        'aiohttp-session>=2.12.0',
+        'redis>=5.0.0',  # redis-py replaces aioredis
         'user_agents',
-        'cryptography==38.0.3'
+        'cryptography>=41.0.0'
     ],
 
     # To provide executable scripts, use entry points in preference to the

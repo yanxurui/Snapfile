@@ -12,7 +12,6 @@ from datetime import datetime
 import asyncio
 import aiohttp
 from aiohttp import web, WSCloseCode
-WSCloseCode.Unauthorized = 4000 # Add a customized close code
 from aiohttp_security import remember, forget, check_authorized
 from user_agents import parse
 
@@ -102,7 +101,7 @@ async def ws(request):
         folder = await check_authorized(request)
     except web.HTTPUnauthorized:
         log.info('close ws connection due to unauthorization')
-        await ws_current.close(code=aiohttp.WSCloseCode.Unauthorized, message='You may have logged out')
+        await ws_current.close(code=4000, message='You may have logged out')  # Custom code for unauthorized
         return ws_current
     name = get_client_display_name(request)
     ws_current['name'] = name
@@ -142,7 +141,6 @@ async def ws(request):
                 else:
                     log.warning('unknow action')
             else:
-                log.warning('unknown message type {}'.format(str(ws_msg.type)))
                 # ws_msg.type == aiohttp.WSMsgType.CLOSING if closed by remove_expired_folders task
                 if ws_msg.type == aiohttp.WSMsgType.CLOSE:
                     assert ws_current.closed
@@ -157,6 +155,11 @@ async def ws(request):
                     # call ws.close() in other coroutines will also lead to here through CLOSING
                     # in this case we don't have to call close again
                     pass
+                elif ws_msg.type == aiohttp.WSMsgType.CLOSED:
+                    # Connection already closed (e.g., client aborted)
+                    log.info('{} connection already closed (aborted)'.format(name))
+                else:
+                    log.warning('unknown message type {}'.format(str(ws_msg.type)))
                 break
     except asyncio.TimeoutError as e:
         log.error('timeout') # we should not reach here since heartbeat is turned on
@@ -178,64 +181,75 @@ async def ws(request):
 async def upload(request):
     folder = await check_authorized(request)
     name = get_client_display_name(request)
-    reader = await request.multipart()
-    count = 0
-    while True:
-        # reader.next() will `yield` the fields of your form
-        field = await reader.next()
-        if field is None:
-            break
-        if field.name != 'myfile[]':
-            raise web.HTTPBadRequest()
-        filename = field.filename
-        if filename is None:
-            # no file is selected
-            continue
-        if request.headers.get('Content-Length') is None or request.headers.get('Transfer-Encoding') is not None:
-            # We can safely assume Content-Length is always available since chunked transfer encoding is not suitable for uploading a file with fixed size
-            raise web.HTTPBadRequest()
-        l = int(request.headers['Content-Length'])
-        if l + folder.current_size > folder.storage_limit:
-            # it should be fine to check storage limit using Content-Length which represents the total size of the request
-            log.warning('Storage limit exceeds: {} > {}'.format(l+folder.current_size, folder.storage_limit))
+    
+    # Get filename from query parameter and content type from header
+    filename = request.query.get('name')
+    content_type = request.headers.get('Content-Type', 'application/octet-stream')
+    
+    if not filename:
+        raise web.HTTPBadRequest(text='Filename is required')
+    
+    # Handle both Content-Length and chunked transfer encoding
+    content_length = request.headers.get('Content-Length')
+    transfer_encoding = request.headers.get('Transfer-Encoding')
+    
+    if content_length is not None:
+        # Traditional upload with known size
+        expected_size = int(content_length)
+        if expected_size + folder.current_size > folder.storage_limit:
+            log.warning('Storage limit exceeds: {} > {}'.format(expected_size + folder.current_size, folder.storage_limit))
             raise web.HTTPRequestHeaderFieldsTooLarge()
-        log.info('start uploading %s' % filename)
-        file_id = await folder.gen_file_id()
-        file_path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, folder.get_file_path(file_id))
-        size = 0
-        try:
-            with open(file_path, 'wb') as f:
-                if config.ENABLE_ENCRYPTION:
-                    cipher, nonce = folder.get_cipher()
-                    encryptor = cipher.encryptor()
-                    f.write(nonce)
-                while True:
-                    chunk = await field.read_chunk(1024*1024)  # 8192 bytes by default.
-                    if not chunk:
-                        # todo: What else could cause this besides reaching the end of a file?
-                        break
-                    size += len(chunk)
-                    log.debug('writing {} for {} ...'.format(len(chunk), filename[:30]))
-                    if config.ENABLE_ENCRYPTION:
-                        chunk = encryptor.update(chunk)
-                    f.write(chunk) # block op
-                assert l >= size, 'Content-Length is usually larger than the file size'
-        except:
-            # if client abort uploading
-            # asyncio.exceptions.CancelledError will be captured here
-            os.remove(f.name)
-            log.warning('interrupt uploading {} due to {}'.format(filename, sys.exc_info()[0]))
-            raise
-        log.info('finish uploading {}'.format(filename))
-        count += 1
-        msg = Message(
-            type=MsgType.FILE,
-            data=filename,
-            size=size,
-            sender=name,
-            file_id=file_id,
-        )
-        await folder.send(msg)
+    elif transfer_encoding == 'chunked':
+        # Streaming upload - we'll check size as we go
+        expected_size = None
+        log.info('Streaming upload detected for %s', filename)
+    else:
+        # Neither Content-Length nor chunked encoding
+        raise web.HTTPBadRequest(text='Content-Length or Transfer-Encoding: chunked required')
+    
+    log.info('start uploading %s (type: %s)' % (filename, content_type))
+    file_id = await folder.gen_file_id()
+    file_path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, folder.get_file_path(file_id))
+    size = 0
+    
+    try:
+        with open(file_path, 'wb') as f:
+            # Read raw file data from request body
+            while True:
+                chunk = await request.content.read(1024*1024)  # Read 1MB at a time
+                if not chunk:
+                    break
+                size += len(chunk)
+                
+                # Check storage limit for streaming uploads
+                if expected_size is None and size + folder.current_size > folder.storage_limit:
+                    log.warning('Storage limit exceeds during streaming upload: {} > {}'.format(
+                        size + folder.current_size, folder.storage_limit))
+                    raise web.HTTPRequestHeaderFieldsTooLarge()
+                
+                log.debug('writing {} for {} ...'.format(len(chunk), filename[:30]))
+                f.write(chunk)  # block op
+        
+        # Validate size for non-streaming uploads
+        if expected_size is not None:
+            assert expected_size == size, 'Content-Length should match uploaded size'
+    except:
+        # if client abort uploading
+        # asyncio.exceptions.CancelledError will be captured here
+        os.remove(file_path)
+        log.warning('interrupt uploading {} due to {}'.format(filename, sys.exc_info()[0]))
+        raise
+    
+    log.info('finish uploading {}'.format(filename))
+    count = 1
+    msg = Message(
+        type=MsgType.FILE,
+        data=filename,
+        size=size,
+        sender=name,
+        file_id=file_id,
+    )
+    await folder.send(msg)
     return web.Response(text='{} file(s) uploaded'.format(count))
 
 
@@ -244,14 +258,17 @@ async def download(request):
     file_id = request.query['id']
     file_name = request.query['name'] # we can not query the filename by file id in server side
     file_path = folder.get_file_path(file_id)
-    if not config.ENABLE_ENCRYPTION:
+    
+    if config.PROD:
+        # Use NGINX X-Accel-Redirect for efficient file serving in production
         resp = web.Response(headers={
             'Content-Disposition': 'attachment; filename="{0}"'.format(file_name),
             'X-Accel-Redirect': '/download/{}'.format(file_path)
             })
-        log.info('redirect to NGINX')
+        log.info('redirect to NGINX for file download')
         return resp
     else:
+        # In TEST/DEV mode, serve file directly from Python
         ct, encoding = mimetypes.guess_type(file_name)
         if not ct:
             ct = "application/octet-stream"
@@ -262,30 +279,24 @@ async def download(request):
             },
         )
         chunk_size = 1024*1024
-        file_path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, file_path)
+        full_file_path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, file_path)
         # Without setting Content-Length, chunked transfer encoding will be used.
         # The downside is that the client has no way to estimate the ETA
         # So, let's infer the Content-Length from the file size
         try:
-            file_size = os.path.getsize(file_path) - 16
+            file_size = os.path.getsize(full_file_path)
         except FileNotFoundError:
             # this is probably a bad request with an arbitrary file id
             raise web.HTTPNotFound()
         resp.content_length = file_size
         await resp.prepare(request)
         log.info('start downloading file: %s', file_name)
-        with open(file_path, 'rb') as file:
-            if config.ENABLE_ENCRYPTION:
-                nonce = file.read(16)
-                cipher, _ = folder.get_cipher(nonce)
-                decryptor = cipher.decryptor()
+        with open(full_file_path, 'rb') as file:
             while True:
                 chunk = file.read(chunk_size)
                 if not chunk:
                     break
                 log.debug('send %d bytes for %s', len(chunk), file_name)
-                if config.ENABLE_ENCRYPTION:
-                    chunk = decryptor.update(chunk)
                 await resp.write(chunk)
         await resp.write_eof()
         log.info('finish downloading file %s', file_name)

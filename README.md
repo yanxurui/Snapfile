@@ -5,10 +5,33 @@ An anonymous file transfer application that enables you to access files from any
 
 ## Features
 * anonymous chat room
-* file transfer across any devices where a modern browswer is available
-* secure:
-    * all user data (messages and files) will be encrypted. Since passcode is never persisted in the server side, no one except the owner can decrypt the data
-    * expires automatically after one day
+* file transfer across any devices where a modern browser is available
+* secure with **end-to-end encryption**:
+    * all user data (messages and files) are encrypted in the browser before being sent to the server
+    * the server cannot decrypt any data - true zero-knowledge architecture
+    * uses industry-standard AES-GCM 256-bit encryption with PBKDF2 key derivation (480,000 iterations)
+    * passcode is hashed (SHA-256) on client side before being sent to server - the original passcode never leaves your browser
+    * unique encryption key derived from your passcode for each session
+* expires automatically after one day
+
+### Security Flow
+
+```
+Client                          Server
+------                          ------
+Generate: "abc123"
+   ↓
+Hash (SHA-256): "0a1b2c..."
+   ↓
+Send hash ──────────────────→   Receive: "0a1b2c..."
+                                   ↓
+Store in browser                Store in Redis
+localStorage["passcode"]        folder:0a1b2c...
+= "abc123"
+
+For encryption:                 For authentication:
+Use original "abc123"           Use hash "0a1b2c..."
+```
 
 
 ## Install & Run
@@ -16,7 +39,7 @@ An anonymous file transfer application that enables you to access files from any
 ### Getting started quickly
 prerequisites
 
-* Python 3.8
+* Python 3.13
 * Redis
 
 ```sh
@@ -29,7 +52,7 @@ cd Snapfile
 vim snapfile/config.file
 
 # 3. install package
-python setup.py -e .
+pip install -e .
 
 # 4. start
 snapfile
@@ -90,7 +113,7 @@ keys:
 
 * `#files:<folder identity>` int: the last file id in a given folder
 * `folder:<folder identity>` str: meta data of a folder serialized in json format, like created time, quota, size, etc
-* `messages::<folder identity>` list: messages (including file meta data) serialized in json format
+* `messages:<folder identity>` list: messages (including file meta data) serialized in json format
 
 ### Supervisord
 manage the lifecycle of the service

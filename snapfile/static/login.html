@@ -57,17 +57,45 @@
     <script src="https://cdn.jsdelivr.net/npm/sjcl@1.0.8/sjcl.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.min.js"></script>
     <script>
-        function sha256(input) {
-            // var myBitArray = sjcl.hash.sha256.hash(input);
-            // return sjcl.codec.hex.fromBits(myBitArray);
-            return input;
+        // Hash the passcode using SHA-256 (client-side)
+        // Only the hash is sent to the server, never the original passcode
+        async function hashPasscode(passcode) {
+            // Check if we're in a secure context (required for crypto.subtle)
+            // if (!window.crypto || !window.crypto.subtle) {
+            //     // Fallback: Use sjcl library for hashing in non-secure contexts
+            //     console.warn('crypto.subtle not available, using sjcl fallback');
+            //     const hash = sjcl.hash.sha256.hash(passcode.toLowerCase());
+            //     const hashHex = sjcl.codec.hex.fromBits(hash);
+            //     // Take a subset similar to what the server was doing with SHA3-256
+            //     // Pick every 4th character to get 16 chars from 64 char hex string
+            //     let result = '';
+            //     for (let i = 0; i < hashHex.length - 1; i += 4) {
+            //         result += hashHex[i];
+            //     }
+            //     return result;
+            // }
+            
+            // Use Web Crypto API (secure contexts only)
+            const encoder = new TextEncoder();
+            const data = encoder.encode(passcode.toLowerCase());
+            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            // Take a subset similar to what the server was doing with SHA3-256
+            // Pick every 4th character to get 16 chars from 64 char hex string
+            let result = '';
+            for (let i = 0; i < hashHex.length - 1; i += 4) {
+                result += hashHex[i];
+            }
+            return result;
         }
 
-        function login(passcode) {
+        async function login(passcode) {
+            const identity = await hashPasscode(passcode);
             $.ajax({
                 type: 'POST',
                 url: '/login',
-                data: { identity: sha256(passcode.toLowerCase())},
+                data: { identity: identity},
                 statusCode: {
                     200: function () {
                         localStorage.setItem("identity", passcode);
@@ -103,39 +131,39 @@
                 // see: https://www.geeksforgeeks.org/generate-random-alpha-numeric-string-in-javascript/
                 var passcode = Math.random().toString(36).substring(2, 8); // length is 6
 
-                // stage 2: generate hash
-                var hashed_passcode = sha256(passcode)
-
-                // stage 3: send request
-                function signup() {
-                    $.ajax('/signup', {
-                        type: "POST",
-                        data: {identity: hashed_passcode},
-                        statusCode: {
-                            201: function () {
-                                // alert("Please save your passcode: " + passcode);
-                                localStorage.setItem("identity", passcode);
-                                window.location = '/';
-                            },
-                            409: function (jqXHR) {
-                                retry--;
-                                // Conflict
-                                console.log(jqXHR.responseText);
-                                if (retry > 0) {
-                                    signup();
-                                }
-                                else {
+                // stage 2: hash the passcode on client side
+                hashPasscode(passcode).then(function(hashed_passcode) {
+                    // stage 3: send hashed passcode to server
+                    function signup() {
+                        $.ajax('/signup', {
+                            type: "POST",
+                            data: {identity: hashed_passcode},
+                            statusCode: {
+                                201: function () {
+                                    // alert("Please save your passcode: " + passcode);
+                                    localStorage.setItem("identity", passcode);
+                                    window.location = '/';
+                                },
+                                409: function (jqXHR) {
+                                    retry--;
+                                    // Conflict
+                                    console.log(jqXHR.responseText);
+                                    if (retry > 0) {
+                                        signup();
+                                    }
+                                    else {
+                                        alert(jqXHR.responseText);
+                                    }
+                                },
+                                507: function (jqXHR) {
+                                    // InsufficientStorage
                                     alert(jqXHR.responseText);
-                                }
-                            },
-                            507: function (jqXHR) {
-                                // InsufficientStorage
-                                alert(jqXHR.responseText);
-                            },
-                        }
-                    });
-                }
-                signup();
+                                },
+                            }
+                        });
+                    }
+                    signup();
+                });
             });
         });
         
