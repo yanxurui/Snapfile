@@ -6,26 +6,13 @@ import json
 import unittest
 import subprocess
 from time import sleep
-from collections.abc import Iterable
+from collections import Iterable
 
 import requests
 import websocket # websocket_client
-from requests.cookies import RequestsCookieJar
-from http.cookiejar import CookieJar
 
 HOST = '127.0.0.1:8090'
 LOG = '../test.log'
-
-# Monkey patch RequestsCookieJar to fix cookie value escaping issue
-# See: https://github.com/psf/requests/issues/5459
-# The issue is that RequestsCookieJar.set_cookie incorrectly handles quoted cookie values
-# We bypass it and call the parent CookieJar.set_cookie directly without modification
-def patched_set_cookie(self, cookie, *args, **kwargs):
-    # Skip the requests library's broken cookie value handling
-    # Just call the parent class method directly
-    return CookieJar.set_cookie(self, cookie, *args, **kwargs)
-
-RequestsCookieJar.set_cookie = patched_set_cookie
 
 # set base url for requests by monkey patch
 # using localhost will trigger 'site-packages/websocket/_http.py:165: ResourceWarning: unclosed <socket.socket'
@@ -186,8 +173,7 @@ class TestLogin(BaseTestCase):
         self.assertEqual(r.status_code, 401)
         r = self.s.post('/logout', allow_redirects=False)
         self.assertEqual(r.status_code, 302)
-        # Check that Location header contains login.html (could be relative or absolute URL)
-        self.assertTrue('login.html' in r.headers['Location'])
+        self.assertTrue('/login.html' in r.headers['Location'])
 
 
 class TestMessaging(BaseTestCase):
@@ -258,11 +244,23 @@ class TestMessaging(BaseTestCase):
         c = self.ws()
         c.abort()
         sleep(0.5)
-        # When a client aborts, the connection is already closed (WSMsgType.CLOSED = 257)
-        self.checkLog('connection already closed (aborted)')
+        self.checkLog('CancelledError')
 
 
 class TestFileUpload(BaseTestCase):
+    def test_upload_1_file(self):
+        c = self.ws()
+        files = [
+            ('myfile[]', ('small.txt', 'I am in a file')),
+        ]
+        r = self.s.post('/files', files=files)
+        self.assertEqual(r.status_code, 200)
+        self.assertDictContainsSubset(self.recv(c, file=True),
+            {
+                'data': 'small.txt',
+                'size': '14.0B'
+            })
+
     def test_upload_2_file(self):
         c = self.ws()
         file_name = 'large.txt'
@@ -270,29 +268,17 @@ class TestFileUpload(BaseTestCase):
             f.write('0'*1000*500)
         with open(file_name, 'rb') as f:
             large = f.read()
-        
-        # Upload small file
-        r = self.s.post(
-            '/files',
-            params={'name': 'small.txt'},
-            data=b'I am in a file',
-            headers={'Content-Type': 'application/octet-stream'}
-        )
+        files = [
+            ('myfile[]', ('small.txt', 'I am in a file')),
+            ('myfile[]', (file_name, large)),
+        ]
+        r = self.s.post('/files', files=files)
         self.assertEqual(r.status_code, 200)
         self.assertDictContainsSubset(self.recv(c, file=True),
             {
                 'data': 'small.txt',
                 'size': '14.0B'
             })
-        
-        # Upload large file
-        r = self.s.post(
-            '/files',
-            params={'name': file_name},
-            data=large,
-            headers={'Content-Type': 'application/octet-stream'}
-        )
-        self.assertEqual(r.status_code, 200)
         self.assertDictContainsSubset(self.recv(c, file=True),
             {
                 'data': file_name,
@@ -303,15 +289,10 @@ class TestFileUpload(BaseTestCase):
         c = self.ws()
         file_content = 'I am in a file'
         content_length = len(file_content)
-        filename = 'small.txt'
-        
-        # Use new raw upload API
-        r = self.s.post(
-            '/files',
-            params={'name': filename},
-            data=file_content.encode('utf-8'),
-            headers={'Content-Type': 'application/octet-stream'}
-        )
+        files = [
+            ('myfile[]', ('small.txt', file_content)),
+        ]
+        r = self.s.post('/files', files=files)
         self.assertEqual(r.status_code, 200)
         m = self.recv(c, file=True)
         r = self.s.get('/files', params={'id':m['file_id'], 'name': m['data']})
@@ -326,13 +307,10 @@ class TestFileUpload(BaseTestCase):
         # NGINX will return 404
 
     def test_upload_out_of_space(self):
-        large_data = '0' * 1024 * 1024 * 2  # 2MB
-        r = self.s.post(
-            '/files',
-            params={'name': 'large.txt'},
-            data=large_data.encode('utf-8'),
-            headers={'Content-Type': 'application/octet-stream'}
-        )
+        files = [
+            ('myfile[]', ('large.txt', '0'*1024*1024*2)),
+        ]
+        r = self.s.post('/files', files=files)
         self.assertEqual(r.status_code, 431)
 
 

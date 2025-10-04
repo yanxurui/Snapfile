@@ -1,6 +1,8 @@
 import os
 import sys
 import json
+import base64
+import hashlib
 import random
 import shutil
 import logging
@@ -9,10 +11,14 @@ from time import time
 from datetime import datetime, timezone, timedelta
 
 import asyncio
-import redis.asyncio as aioredis
+import aioredis
 import aiohttp
 from aiohttp import web
 from concurrent.futures import ThreadPoolExecutor
+
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from . import config
 
@@ -115,6 +121,7 @@ class Message(dict):
 class Folder:
     def __init__(self,
                  identity,
+                 encryption_key=None,
                  created_time=None,
                  age=None,
                  storage_limit=config.STORAGE_PER_FOLDER,
@@ -122,6 +129,7 @@ class Folder:
                  path=None,
                  **kwargs):
         self.identity = identity
+        self.encryption_key = encryption_key
         self.created_time = datetime.now(timezone.utc).isoformat() if created_time is None else created_time
         self.age = config.AGE if age is None else age
         self.storage_limit = storage_limit
@@ -163,6 +171,7 @@ class Folder:
         """
         o = dict(self.__dict__)
         del o['connections']
+        del o['encryption_key']
         return json.dumps(o)
 
     def get_file_path(self, file_id=None):
@@ -180,6 +189,12 @@ class Folder:
         file_id = await redis.incr('#files:{}'.format(self.identity))
         return str(file_id)
 
+    def get_cipher(self, nonce=None):
+        if nonce is None:
+            nonce = os.urandom(16)
+        algorithm = algorithms.ChaCha20(self.encryption_key, nonce)
+        return Cipher(algorithm, mode=None), nonce
+
     def connect(self, ws):
         self.connections.add(ws)
 
@@ -194,6 +209,12 @@ class Folder:
     async def save(self, msg):
         """Save the message in this folder
         """
+        if config.ENABLE_ENCRYPTION:
+            msg = Message(**msg)
+            cipher, nonce = self.get_cipher()
+            encryptor = cipher.encryptor()
+            data_b = nonce + encryptor.update(msg.data.encode('utf-8'))
+            msg.data = base64.b64encode(data_b).decode('ascii') # convert to str to fit in json. https://stackoverflow.com/a/40000564
         folder_key, msg_key = self._keys(self.identity)
         async with redis.pipeline(transaction=True) as tr:
             # enqueue: "If key does not exist, it is created as empty"
@@ -237,8 +258,6 @@ class Folder:
                 })
 
     async def retrieve(self, offset):
-        """Retrieve messages from storage
-        """
         if offset < 0:
             raise web.HTTPBadRequest
         _, msg_key = self._keys(self.identity)
@@ -250,6 +269,13 @@ class Folder:
         results = []
         for m in msgs_json:
             msg = Message(**json.loads(m))
+            if config.ENABLE_ENCRYPTION:
+                data_b = base64.b64decode(msg.data)
+                nonce = data_b[:16]
+                cipher, nonce = self.get_cipher(nonce)
+                decryptor = cipher.decryptor()
+                msg.data = decryptor.update(data_b[16:]).decode('utf-8')
+            # unfortunately, we could not use generator here: TypeError: object async_generator can't be used in 'await' expression
             results.append(msg)
         return results
   
@@ -257,9 +283,36 @@ class Folder:
     def _keys(identity):
         return 'folder:%s' % identity, 'messages:%s' % identity
 
+    @staticmethod
+    def _gen_hash(identity):
+        '''Given the passcode, generate a hash
+        For security, we don't store user's passcode in the server since passcode
+        is used to derive the key to encrypt messages and files.
+        The key derivation method (PBKDF2HMAC-SHA256) we are using only relies
+        on SHA256(passcode). Therefore, we must use a different cryptography
+        hash function here. We adopt SHA3-256 as it uses a completely different struction
+        from the SHA-256.
+        Also, we only pick 16 chars from the hexdigest of length 64. This makes it
+        even harder to exploit.
+        '''
+        return hashlib.sha3_256(identity.encode('utf-8')).hexdigest()[0:-1:4]
+
+    @staticmethod
+    def _gen_encryption_key(passcode):
+        """generate a 32-byte key used for symmethric encryption
+        """
+        salt = os.urandom(16)
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=480000,
+        )
+        return kdf.derive(passcode.encode('utf-8'))
+
     @classmethod
-    async def create(cls, identity, age=None):
-        # identity is already hashed on client side
+    async def create(cls, passcode, age=None):
+        identity = cls._gen_hash(passcode)
         if await cls._exists(identity):
             # Anti brute force must be employed to disable this exploitation
             raise web.HTTPConflict(text='Identity conflicts, please try again!')
@@ -275,9 +328,11 @@ class Folder:
         return True
 
     @classmethod
-    async def login(cls, identity):
-        # identity is already hashed on client side
+    async def login(cls, passcode):
+        identity = cls._gen_hash(passcode) # the raw passcode is never persisted
         folder = await cls.open(identity)
+        if folder is not None:
+            folder.encryption_key = cls._gen_encryption_key(passcode)
         return folder
 
     @classmethod

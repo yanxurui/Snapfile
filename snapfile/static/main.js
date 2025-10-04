@@ -38,32 +38,6 @@ function formatDate(date) {
 }
 
 $(function() {
-    // =====BEGIN=====Encryption Setup
-    // Initialize encryption with user's passcode
-    var passcode = localStorage.getItem("identity");
-    if (!passcode) {
-        window.location = 'login.html';
-        return;
-    }
-    
-    // Check if Web Crypto API is supported
-    if (!E2EEncryption.isSupported()) {
-        alert('Your browser does not support Web Crypto API. Please use a modern browser.');
-        return;
-    }
-
-    // Initialize encryption (async) - must complete before connecting
-    var encryptionReady = false;
-    var encryptionInitPromise = crypto_e2e.initialize(passcode).then(() => {
-        encryptionReady = true;
-        console.log('End-to-end encryption initialized');
-    }).catch(err => {
-        console.error('Failed to initialize encryption:', err);
-        alert('Failed to initialize encryption. Please try again.');
-        throw err;
-    });
-    // =====END=====Encryption Setup
-
     // =====BEGIN=====Messaging
     var conn = null; // websocket
     var connected = false;
@@ -76,34 +50,24 @@ $(function() {
     var regex = new RegExp(expression);
 
     // display a single message
-    async function display(msg) {
+    function display(msg) {
         var tr = $('<tr>');
         if (msg.type == 0) {
-            // TEXT - decrypt the message
-            try {
-                // Wait for encryption to be ready
-                if (!encryptionReady) {
-                    await encryptionInitPromise;
-                }
-                var decryptedText = await crypto_e2e.decryptText(msg.data);
-                var td = $('<td colspan="2">');
-                if (decryptedText.match(regex)) {
-                    // create a link for the url
-                    var a = $('<a />');
-                    a.attr('target', '_blank');
-                    a.attr('href', decryptedText);
-                    a.text(decryptedText);
-                    td.html(a);
-                }
-                else {
-                    // use text instead of html to avoid xss attack
-                    td.text(decryptedText);
-                }
-                tr.append(td);
-            } catch (err) {
-                console.error('Failed to decrypt message:', err);
-                tr.append($('<td colspan="2">').text('[Decryption failed]'));
+            // TEXT
+            var td = $('<td colspan="2">');
+            if (msg.data.match(regex)) {
+                // create a link for the url
+                var a = $('<a />');
+                a.attr('target', '_blank');
+                a.attr('href', msg.data);
+                a.text(msg.data);
+                td.html(a);
             }
+            else {
+                // use text instead of html to avoid xss attack
+                td.text(msg.data);
+            }
+            tr.append(td);
         }
         else if (msg.type == 1) {
             //  FILE
@@ -111,58 +75,7 @@ $(function() {
                 id: msg.file_id,
                 name: msg.data,
             });
-            var a = $('<a href="#" class="download-link">').text(msg.data);
-            a.data('file-id', msg.file_id);
-            a.data('file-name', msg.data);
-            
-            // Add click handler for encrypted download
-            a.on('click', async function(e) {
-                e.preventDefault();
-                var fileId = $(this).data('file-id');
-                var fileName = $(this).data('file-name');
-                
-                try {
-                    // Show downloading status
-                    popup('Downloading and decrypting...');
-                    
-                    // Fetch encrypted file as stream
-                    const response = await fetch('/files?' + new URLSearchParams({
-                        id: fileId,
-                        name: fileName
-                    }));
-                    
-                    if (!response.ok || !response.body) {
-                        throw new Error('Download failed');
-                    }
-
-                    // Create decrypted stream: fetch -> decrypt
-                    // Memory efficient: constant ~64MB memory usage for any file size
-                    const decryptTransform = crypto_e2e.createDecryptTransform();
-                    const decryptedStream = response.body.pipeThrough(decryptTransform);
-                    
-                    // Create a blob from the decrypted stream
-                    // Browser handles this efficiently with streaming
-                    const decryptedResponse = new Response(decryptedStream);
-                    const decryptedBlob = await decryptedResponse.blob();
-                    
-                    // Trigger browser download
-                    const url = URL.createObjectURL(decryptedBlob);
-                    const downloadLink = document.createElement('a');
-                    downloadLink.href = url;
-                    downloadLink.download = fileName;
-                    downloadLink.click();
-                    
-                    // Clean up
-                    URL.revokeObjectURL(url);
-                    popup('Download complete!');
-                } catch (err) {
-                    console.error('Failed to download/decrypt file:', err);
-                    alert('Failed to download or decrypt file. Please try again.');
-                }
-                
-                return false;
-            });
-            
+            var a = $('<a target="_blank">').attr('href', '/files?' + params.toString()).text(msg.data);
             tr.append(
                 $('<td>').append(a),
                 $('<td class="right">').text(msg.size),
@@ -199,14 +112,9 @@ $(function() {
                     }));
                     break;
                 case 'send':
-                    // Decrypt messages asynchronously
-                    (async () => {
-                        for (const msg of data.msgs) {
-                            await display(msg);
-                        }
-                        updateScroll();
-                        msg_count += data.msgs.length;
-                    })();
+                    data.msgs.forEach(msg => display(msg));
+                    updateScroll();
+                    msg_count += data.msgs.length;
                     break;
             }
         };
@@ -269,24 +177,16 @@ $(function() {
 
     send.on('click', function() {
         var text = textarea.val();
-        if (text && encryptionReady) {
-            // Encrypt the message before sending
-            crypto_e2e.encryptText(text).then(encryptedText => {
-                // console.log('send');
-                conn.send(JSON.stringify({
-                    action: 'send',
-                    data: encryptedText
-                }));
-                textarea.val('');
-                if( ! /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ) {
-                    textarea.focus(); // bad UE on mobile
-                }
-            }).catch(err => {
-                console.error('Failed to encrypt message:', err);
-                alert('Failed to encrypt message. Please try again.');
-            });
-        } else if (!encryptionReady) {
-            alert('Encryption is not ready yet. Please wait a moment and try again.');
+        if (text) {
+            // console.log('send');
+            conn.send(JSON.stringify({
+                action: 'send',
+                data: text
+            }));
+            textarea.val('');
+            if( ! /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ) {
+                textarea.focus(); // bad UE on mobile
+            }
         }
         return false;
     });
@@ -337,12 +237,7 @@ $(function() {
         modal.addClass("on");
     });
 
-    // Wait for encryption to be ready before connecting
-    encryptionInitPromise.then(() => {
-        connect(); // connect only after encryption is initialized
-    }).catch(err => {
-        console.error('Cannot connect: encryption initialization failed', err);
-    });
+    connect(); // connect immediately
     // ======END======
 
 
@@ -371,111 +266,69 @@ $(function() {
             upload_btn.show();
         }
     }
-
-    // Upload files function - direct streaming approach without ajaxSubmit
-    async function uploadFiles(files) {
-        if (!encryptionReady) {
-            alert('Encryption is not ready yet. Please wait a moment and try again.');
-            return;
-        }
-
-        try {
-            toggleUpload();
-            const startTime = Date.now();
-            let lastTime = startTime;
-            let lastPosition = 0;
-            let totalSize = 0;
-
-            // Calculate total size
-            for (const file of files) {
-                totalSize += file.size;
+    var options = {
+        beforeSubmit: function(formData, jqForm, options) {
+            // is this the right way to preserve some custom data between callbacks?
+            this.startTime = Date.now(); // current time in milliseconds
+            this.total = 0;
+            for (var i=0; i < formData.length; i++) {
+                this.total += formData[i].value.size;
             }
-
-            // Upload files with streaming encryption
-            for (const file of files) {
-                const fileName = file.name;
-                
-                // Create progress tracking transform stream
-                let uploadedSize = 0;
-                const progressStream = new TransformStream({
-                    transform(chunk, controller) {
-                        uploadedSize += chunk.byteLength;
-                        
-                        // Update progress
-                        const time = Date.now();
-                        const timeSpan = time - lastTime;
-                        if (timeSpan > 500) {
-                            const speed = (uploadedSize - lastPosition) / timeSpan; // KB/s
-                            const percentComplete = Math.round((uploadedSize / totalSize) * 100);
-                            percent.text(percentComplete + '% ' + formatSize(speed) + 'B/s');
-                            lastTime = time;
-                            lastPosition = uploadedSize;
-                        }
-                        
-                        controller.enqueue(chunk);
-                    }
-                });
-                
-                // Create encrypted stream directly from file using TransformStream
-                const encryptedStream = file.stream()
-                    .pipeThrough(await crypto_e2e.createEncryptTransformStream())
-                    .pipeThrough(progressStream);
-
-                // Upload with fetch - streaming encrypted file
-                percent.text('Uploading: 0%');
-                const response = await fetch('/files?' + new URLSearchParams({
-                    name: fileName
-                }), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/octet-stream'
-                    },
-                    duplex: 'half',
-                    body: encryptedStream
-                });
-
-                if (response.status === 200) {
-                    const responseText = await response.text();
-                    const speed = totalSize / (Date.now() - startTime);
-                    percent.text('Success: ' + responseText + ' (' + formatSize(speed) + 'B/s)');
-                } else if (response.status === 431) {
-                    percent.text('Error: Storage space not enough');
-                    throw new Error('Storage space not enough');
-                } else if (response.status === 413) {
-                    percent.text('Error: File too large');
-                    throw new Error('File too large');
-                } else {
-                    const errorText = await response.text();
-                    percent.text('Error: ' + errorText);
-                    throw new Error(errorText);
-                }
+            this.lastTime = this.startTime;
+            this.lastPosition = 0;
+            percent.text('0%');
+        },
+        uploadProgress: function(event, position, total, percentComplete) {
+            // don't know
+            // If I initiate lastTime and lastPosition in beforeSend, they won't be available here
+            // If I initiate total in beforeSubmit, it is available here but
+            // if I set total here, it is not available in complete
+            // console.log('upload...');
+            var time = Date.now();
+            var timeSpan = time - this.lastTime;
+            if (timeSpan > 500) {
+                var speed = (position - this.lastPosition) / timeSpan; // KB/s
+                percent.text(percentComplete + '% ' + formatSize(speed) + 'B/s');
+                this.lastTime = time;
+                this.lastPosition = position;
             }
-
-            toggleUpload();
-        } catch (err) {
-            console.error('Upload error:', err);
+        },
+        complete: function(xhr, textStatus) {
+            // success or error
+            if (xhr.status == 431) {
+                alert('Sorry! Your storage space is not enough!');
+            }
+            else if (xhr.status == 413) {
+                // NGINX will return html directly
+                xhr.responseText = '413 Request Entity Too Large';
+            }
+            else if (xhr.status == 200) {
+                // avg speed
+                var speed = this.total / (Date.now() - this.startTime); // KB
+                xhr.responseText += ' (' + formatSize(speed) + 'B/s)';
+            }
+            percent.text(textStatus + ': ' + xhr.responseText);
             toggleUpload();
         }
-    }
-
+    };
     // forward the click event
     upload_btn.click(function () {
         file_input.trigger('click');
     });
-    
-    // TODO: Implement proper cancel functionality for fetch requests
     cancel_upload_btn.click(function () {
-        // Note: Canceling fetch requests requires AbortController
-        console.log('Cancel functionality needs to be implemented with AbortController');
+        var xhr = form.data('jqxhr');
+        xhr.responseText = 'Canceled';
+        xhr.abort();
     });
-    
     // listen on select file
     file_input.on('change', function(){
-        if (this.files && this.files.length > 0) {
-            // Upload immediately after selecting file(s)
-            uploadFiles(Array.from(this.files));
+        if (this.value) {
+            // submit when the field is not empty
+            // i.e., uploading immediately after selecting file(s)
+            form = $("form#file").ajaxSubmit(options);
             // checkout https://stackoverflow.com/questions/12030686/html-input-file-selection-event-not-firing-upon-selecting-the-same-file
             this.value = null;
+            toggleUpload();
         }
     });
 
@@ -494,8 +347,9 @@ $(function() {
     })
     .on('drop', function(e) {
         $(this).removeClass('dragging');
-        var files = Array.from(e.originalEvent.dataTransfer.files);
-        uploadFiles(files);
+        var files = e.originalEvent.dataTransfer.files;
+        file_input.prop('files', files);
+        file_input.trigger("change");
         return false;
     });
     // ======END======
