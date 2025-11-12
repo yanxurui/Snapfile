@@ -24,6 +24,8 @@ html, body {margin: 0; height: 100%; overflow: hidden}
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
+    opacity: 0; /* Hide initially to prevent placeholder flash, but preserve layout */
+    transition: opacity 0.3s ease; /* Smooth fade-in effect */
 }
 #middle {
     flex: 1 1 auto;

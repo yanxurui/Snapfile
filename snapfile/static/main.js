@@ -167,6 +167,8 @@ $(function() {
     function update_status(data) {
         // awesome, it works like a template engine
         $('#status_bar').html(status_bar_tmpl.formatUnicorn(data));
+        // Make status bar visible with smooth fade-in now that we have real data
+        $('#status_bar').css('opacity', '1');
         // the drawback is that event callbacks registered on these dom before will disappear
     }
 
