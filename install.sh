@@ -3,7 +3,7 @@ set -e # exit on error
 
 user=yxr
 prefix=/var/www/snapfile
-pyversion=3.8.1
+pyversion=3.12.6
 
 ## 1. install prerequisites
 packageList="nginx redis supervisor"

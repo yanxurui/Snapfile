@@ -11,9 +11,9 @@ from time import time
 from datetime import datetime, timezone, timedelta
 
 import asyncio
-import aioredis
 import aiohttp
 from aiohttp import web
+from redis import asyncio as aioredis
 from concurrent.futures import ThreadPoolExecutor
 
 from cryptography.hazmat.primitives import hashes
