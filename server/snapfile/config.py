@@ -1,4 +1,6 @@
 # DEFAULT
+import os
+
 PROD = False
 PORT = 8090
 REDIS_ADDRESS = 'redis://localhost'
@@ -16,7 +18,6 @@ HEARTBEAT = 30 # seconds
 RECEIVE_TIMEOUT = 3600 # 1 hour
 
 # PROD or TEST
-import os
 ENV = os.environ.get('ENV')
 if ENV == 'PROD':
     PROD = True

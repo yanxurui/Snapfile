@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
+const distDir = path.resolve(rootDir, 'dist');
 
 export default defineConfig({
   plugins: [vue()],
@@ -26,7 +27,7 @@ export default defineConfig({
     }
   },
   build: {
-    outDir: path.resolve(rootDir, '../snapfile/static'),
+    outDir: distDir,
     emptyOutDir: true,
     rollupOptions: {
       input: {

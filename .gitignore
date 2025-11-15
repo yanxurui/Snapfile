@@ -1,4 +1,6 @@
 upload
+dump.rdb
+
 client/node_modules/
 client/dist/
 

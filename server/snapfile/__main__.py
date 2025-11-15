@@ -1,4 +1,5 @@
 import os
+import sys
 import logging
 from . import config
 # This function does nothing if the root logger already has handlers configured.
@@ -34,7 +35,7 @@ def init_app():
     policy = aiohttp_security.SessionIdentityPolicy()
     aiohttp_security.setup(app, policy, SimpleAuthorizationPolicy(cache))
 
-    app.add_routes([
+    routes = [
         web.get('/ws', ws),
         web.post('/signup', signup),
         web.post('/login', login),
@@ -44,8 +45,19 @@ def init_app():
         web.get('/files', download),
         web.get('/', index, name='index'), # static does not support redirect / to /index.html
         web.get('/index.html', index), # serve a single static file with auth
-        # below are static files that should be served by NGINX
-        web.static('/', os.path.join(dir_path, 'static'), name='static')]) # handle static files such as html, js, css
+    ]
+
+    if not config.PROD:
+        repo_root = os.path.abspath(os.path.join(dir_path, '..', '..'))
+        static_root = os.path.join(repo_root, 'client', 'dist')
+        if not os.path.isdir(static_root):
+            log.error("Static assets directory not found at '%s'", static_root)
+            log.error("Please run 'npm run build' in the 'client' directory first.")
+            sys.exit(1)
+        log.info("Serving static files from '%s'", static_root)
+        routes.append(web.static('/', static_root, name='static'))
+
+    app.add_routes(routes)
 
     return app
 
