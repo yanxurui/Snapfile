@@ -1,4 +1,6 @@
 upload
+client/node_modules/
+client/dist/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
