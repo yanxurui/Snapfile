@@ -57,3 +57,34 @@ function buildFileUrl(message) {
   return `/files?${params.toString()}`;
 }
 </script>
+
+<style scoped>
+/* Table Styles */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+tr:nth-child(even) {
+  background-color: #f2f2f2;
+}
+
+td {
+  padding: 8px;
+}
+
+td:first-child {
+  /*prevent large blank on the right when the message body is short*/
+  width: 100%;
+  /*display newlines*/
+  white-space: pre-wrap;
+}
+
+td:last-child {
+  white-space: nowrap;
+}
+
+td.right {
+  text-align: right;
+}
+</style>

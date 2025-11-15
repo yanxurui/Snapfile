@@ -439,3 +439,100 @@ async function handleLogout() {
   window.location.href = '/login.html';
 }
 </script>
+
+<style scoped>
+/* App Layout Styles */
+#container {
+  max-width: 800px;
+  height: 100%;
+  margin: 0 auto;
+  padding: 10px;
+  box-sizing: border-box;
+  display: flex;
+  flex-flow: column;
+}
+
+#container.dragging {
+  background-color: antiquewhite;
+}
+
+#top {
+  flex: 0 1 auto;
+  display: flex;
+}
+
+#middle {
+  flex: 1 1 auto;
+  overflow-y: scroll;
+  border-top: 2px solid gray;
+}
+
+#bottom {
+  position: relative;
+  flex: 0 1 auto;
+}
+
+.inputAddon {
+  display: flex;
+  align-items: baseline;
+  flex-flow: row nowrap;
+}
+
+.inputAddon span {
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+textarea {
+  /*border: none;*/
+  /*outline: none;*/
+  resize: none;
+  width: 100%;
+  /*height: 100%;*/
+  box-sizing: border-box;
+  font-size: 18px;
+  background: transparent;
+}
+
+/*bootstrap's outline buttons*/
+/*default color is green*/
+button,
+input[type='button'] {
+  -webkit-appearance: button;
+  appearance: button;
+  cursor: pointer;
+  color: #28a745;
+  background-color: transparent;
+  white-space: nowrap;
+  border: 1px solid #28a745;
+  padding: 0.375rem 0.75rem;
+  font-size: 1rem;
+}
+
+button:hover:enabled,
+input[type='button']:hover:enabled {
+  color: white;
+  background-color: #28a745;
+}
+
+button:disabled,
+input[type='button']:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+input.right {
+  float: right;
+}
+
+input#cancel {
+  display: none;
+}
+
+/*hide the actual form*/
+form#file {
+  display: none;
+}
+</style>

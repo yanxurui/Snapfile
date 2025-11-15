@@ -31,3 +31,16 @@ function formatDate(value) {
 
 const formattedExpire = computed(() => formatDate(props.info.expire_at));
 </script>
+
+<style scoped>
+#status_bar {
+  margin: 2px;
+  padding-right: 8px;
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  transition: opacity 0.3s ease;
+}
+</style>

@@ -34,15 +34,36 @@
 <script setup>
 import { onMounted, ref } from 'vue';
 
+// ---------------------------------------------------------------------------
+// Constants & Configuration
+// ---------------------------------------------------------------------------
 const formHeaders = {
   'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
 };
 
+// ---------------------------------------------------------------------------
+// Reactive State
+// ---------------------------------------------------------------------------
+const passcode = ref('');
+const submitting = ref(false);
+const creating = ref(false);
+const error = ref('');
+
+// ---------------------------------------------------------------------------
+// Utility Functions
+// ---------------------------------------------------------------------------
 function sha256(input) {
   // Placeholder for real hash if needed
   return input;
 }
 
+function genRandomCode() {
+  return Math.random().toString(36).substring(2, 8);
+}
+
+// ---------------------------------------------------------------------------
+// API Functions
+// ---------------------------------------------------------------------------
 async function login(identity) {
   const response = await fetch('/login', {
     method: 'POST',
@@ -66,14 +87,13 @@ async function signup(identity) {
   }
 }
 
-const passcode = ref('');
-const submitting = ref(false);
-const creating = ref(false);
-const error = ref('');
-
+// ---------------------------------------------------------------------------
+// Form Handlers
+// ---------------------------------------------------------------------------
 async function handleLoginWithPasscode(raw) {
   submitting.value = true;
   error.value = '';
+  
   try {
     const normalized = raw.trim();
     await login(sha256(normalized.toLowerCase()));
@@ -94,13 +114,10 @@ async function handleLogin() {
   await handleLoginWithPasscode(passcode.value);
 }
 
-function genRandomCode() {
-  return Math.random().toString(36).substring(2, 8);
-}
-
 async function createFolder() {
   creating.value = true;
   error.value = '';
+  
   let attempts = 5;
   while (attempts > 0) {
     const candidate = genRandomCode();
@@ -117,9 +134,13 @@ async function createFolder() {
       }
     }
   }
+  
   creating.value = false;
 }
 
+// ---------------------------------------------------------------------------
+// Lifecycle Hooks
+// ---------------------------------------------------------------------------
 onMounted(() => {
   const params = new URLSearchParams(window.location.search);
   const sharedIdentity = params.get('identity');
@@ -179,7 +200,7 @@ onMounted(() => {
   border-bottom: 2px solid #ddd;
   border-radius: 0;
   margin: 8px 0;
-  background: transparent;
+  background-color: rgb(232, 240, 254);
   font-size: 18px;
   box-sizing: border-box;
   outline: none;
@@ -191,7 +212,7 @@ onMounted(() => {
 }
 
 .login-card input[type='password']:hover {
-  border-bottom-color: #999;
+  border-bottom-color: #28a745;
 }
 
 .login-card input[type='password']::placeholder {
