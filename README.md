@@ -26,19 +26,19 @@ cd
 git clone https://github.com/yanxurui/Snapfile
 cd Snapfile
 
-# 1.1 install client dependencies & build assets
+# 2. build
 cd client
 npm install
 npm run build
 cd ..
 
-# 2. change default configuration
+# 3. change default configuration
 vim snapfile/config.file
 
-# 3. install package
+# 4. install package
 python setup.py -e .
 
-# 4. start
+# 5. start
 snapfile
 ```
 

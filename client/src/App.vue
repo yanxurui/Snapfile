@@ -164,7 +164,7 @@ const fileInput = ref(null);
 const uploading = ref(false);
 const percentText = ref('');
 const currentXhr = ref(null);
-const uploadMetrics = reactive({ lastTime: 0, lastLoaded: 0 });
+const uploadMetrics = reactive({ lastTime: 0, lastLoaded: 0, startTime: 0, total: 0 });
 
 const toast = reactive({ visible: false, message: '' });
 const toastTimer = ref(null);
@@ -307,6 +307,8 @@ function uploadFiles(files) {
   percentText.value = '0%';
   uploadMetrics.lastTime = performance.now();
   uploadMetrics.lastLoaded = 0;
+  uploadMetrics.startTime = Date.now();
+  uploadMetrics.total = 0;
 
   const formData = new FormData();
   list.forEach((file) => formData.append('myfile[]', file, file.name));
@@ -316,6 +318,7 @@ function uploadFiles(files) {
 
   xhr.upload.onprogress = (event) => {
     if (event.lengthComputable) {
+      uploadMetrics.total = event.total;
       const percent = Math.round((event.loaded / event.total) * 100);
       const now = performance.now();
       const deltaTime = now - uploadMetrics.lastTime;
@@ -331,8 +334,12 @@ function uploadFiles(files) {
 
   xhr.onload = () => {
     uploading.value = false;
+    
     if (xhr.status === 200) {
-      percentText.value = `Success: ${xhr.responseText}`;
+      // Calculate average speed over entire upload duration
+      const avgSpeed = uploadMetrics.total / (Date.now() - uploadMetrics.startTime); // KB/s
+      const avgSpeedFormatted = formatSize(avgSpeed * 1000); // Convert to B/s for formatSize
+      percentText.value = `Success: ${xhr.responseText} (${avgSpeedFormatted}/s)`;
       showToast('Upload complete');
     } else if (xhr.status === 431) {
       percentText.value = 'Error: Storage space not enough';
@@ -407,7 +414,14 @@ async function handleShare() {
   }
   try {
     if (!qr.image) {
-      qr.image = await QRCode.toDataURL(url);
+      qr.image = await QRCode.toDataURL(url, {
+        width: 512,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
+        }
+      });
     }
     qr.open = true;
   } catch (err) {

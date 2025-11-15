@@ -1,9 +1,7 @@
 <template>
   <div v-if="open" class="qr-overlay" @click.self="emit('close')">
-    <div class="qr-card">
-      <img v-if="image" :src="image" alt="Share QR code" />
-      <p v-else>Generating QR code…</p>
-    </div>
+    <img v-if="image" :src="image" alt="Share QR code" class="qr-image" />
+    <p v-else class="qr-loading">Generating QR code…</p>
   </div>
 </template>
 
@@ -23,25 +21,31 @@ const emit = defineEmits(['close']);
 
 <style scoped>
 .qr-overlay {
-  position: fixed;
-  inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
   display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
+  justify-content: center; /* align horizontal */
+  align-items: center; /* align vertical */
+  position: fixed; /* Stay in place */
+  z-index: 1; /* Sit on top */
+  left: 0;
+  top: 0;
+  width: 100%; /* Full width */
+  height: 100%; /* Full height */
+  overflow: auto; /* Enable scroll if needed */
+  background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
 }
 
-.qr-card {
-  background: white;
-  padding: 24px;
-  border-radius: 16px;
-  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.25);
+.qr-image {
+  /* QR code image styling to match original size */
+  width: 256px;
+  height: 256px;
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+}
+
+.qr-loading {
+  color: white;
+  font-size: 18px;
   text-align: center;
-}
-
-.qr-card img {
-  width: 240px;
-  height: 240px;
 }
 </style>

@@ -130,6 +130,128 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* Login page - Original styling to match the legacy design exactly */
+.login-page {
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.login-card {
+  position: relative;
+  border-radius: 5px;
+  background-color: #f2f2f2;
+  padding: 20px 0 30px 0;
+  width: min(600px, 100%);
+  text-align: center;
+}
+
+.login-card h1 {
+  margin-top: 0;
+  font-size: 2rem;
+}
+
+.login-card h2 {
+  font-weight: 400;
+  color: #555;
+}
+
+.login-card form,
+.login-card .actions {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
+
+.login-card input[type='password'] {
+  /*clear ios weird style*/
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  max-width: 600px;
+  padding: 16px 8px;
+  border: none;
+  border-bottom: 2px solid #ddd;
+  border-radius: 0;
+  margin: 8px 0;
+  background: transparent;
+  font-size: 18px;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-bottom-color 0.3s ease, color 0.3s ease;
+}
+
+.login-card input[type='password']:focus {
+  border-bottom-color: #28a745;
+}
+
+.login-card input[type='password']:hover {
+  border-bottom-color: #999;
+}
+
+.login-card input[type='password']::placeholder {
+  color: #999;
+  transition: color 0.3s ease;
+}
+
+.login-card input[type='password']:focus::placeholder {
+  color: #666;
+}
+
+.login-card button[type='submit'],
+.login-card button.primary {
+  background-color: green;
+  color: white;
+  /*clear ios weird style*/
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  max-width: 600px;
+  padding: 12px;
+  border: none;
+  border-radius: 4px;
+  margin: 5px 0;
+  opacity: 0.85;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.login-card button[type='submit']:hover,
+.login-card button.primary:hover {
+  opacity: 1;
+}
+
+.login-card button[type='button']:not(.primary) {
+  background-color: red;
+  color: white;
+  /*clear ios weird style*/
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  max-width: 600px;
+  padding: 12px;
+  border: none;
+  border-radius: 4px;
+  margin: 5px 0;
+  opacity: 0.85;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.login-card button[type='button']:not(.primary):hover {
+  opacity: 1;
+}
+
+.login-card .divider {
+  margin: 18px 0 4px;
+  color: #777;
+}
+
 .error {
   color: #f5222d;
   margin-top: 12px;
