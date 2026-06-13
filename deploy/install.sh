@@ -21,38 +21,56 @@ done
 
 
 ## 2. build client code
-# Check if Node.js is available
-if ! command -v node &> /dev/null; then
-    echo "Node.js is not available. Please install Node.js first."
-    exit 1
+# Vite 5 requires Node 18+. Official Node 18+ binaries need glibc >= 2.28, which
+# this deploy target (CentOS 7, glibc 2.17) does NOT have, so we can't always
+# build on the server. If a new-enough Node is present we build here; otherwise
+# we fall back to a pre-built client/dist (build it on a dev machine / CI and
+# copy it over), and only error out if neither is available.
+REQUIRED_NODE_MAJOR=18
+
+node_major=0
+if command -v node &> /dev/null; then
+    node_major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
 fi
 
-echo "Building Vue.js client..."
-cd "$CLIENT_DIR"
-
-# Install dependencies
-echo "Installing npm dependencies..."
-npm install
-
-# Build the client
-echo "Building client for production..."
-npm run build
+if [ "$node_major" -ge "$REQUIRED_NODE_MAJOR" ]; then
+    echo "Building Vue.js client (node $(node --version))..."
+    cd "$CLIENT_DIR"
+    npm ci || npm install
+    npm run build
+    cd "$PROJECT_ROOT"
+elif [ -f "$CLIENT_DIST_DIR/index.html" ]; then
+    echo "Node ${REQUIRED_NODE_MAJOR}+ not found (have: $(node --version 2>/dev/null || echo none))."
+    echo "Using the pre-built client already in $CLIENT_DIST_DIR."
+else
+    echo "ERROR: building the client needs Node ${REQUIRED_NODE_MAJOR}+, but this host has $(node --version 2>/dev/null || echo 'no node')."
+    echo "On CentOS 7 (glibc 2.17) Node ${REQUIRED_NODE_MAJOR}+ cannot run, so build the client elsewhere and copy it here:"
+    echo "  (dev machine) cd client && npm ci && npm run build"
+    echo "  rsync -a client/dist/ ${user}@<this-host>:${CLIENT_DIST_DIR}/"
+    echo "then re-run this script."
+    exit 1
+fi
 
 # Verify build output exists
-if [ ! -d "$CLIENT_DIST_DIR" ]; then
-    echo "Error: Build failed, dist directory not found"
+if [ ! -f "$CLIENT_DIST_DIR/index.html" ]; then
+    echo "Error: client build output not found at $CLIENT_DIST_DIR"
     exit 1
 fi
-
-cd "$PROJECT_ROOT"
 
 ## 3. install
 echo "Installing application files..."
 mkdir -p $prefix/static
 
-# Copy built client files to web directory
+# Copy built client files to web directory.
+# Use --delete (or clear first) so stale assets from a previous build/UI don't
+# linger next to the new content-hashed files.
 echo "Copying built client files to $prefix/static..."
-/bin/cp -Rf "$CLIENT_DIST_DIR/." $prefix/static/
+if command -v rsync &> /dev/null; then
+    rsync -a --delete "$CLIENT_DIST_DIR/" "$prefix/static/"
+else
+    rm -rf "${prefix:?}/static/"*
+    /bin/cp -Rf "$CLIENT_DIST_DIR/." "$prefix/static/"
+fi
 
 # Setup configuration files
 ln -sf "$DEPLOY_DIR/snapfile.conf" /etc/nginx/conf.d/snapfile.conf
@@ -86,7 +104,12 @@ EOF
 # namei -om /var/www/snapfile/static
 
 ## 4. start
-read -p "Please prepare https certificates for NGINX. Press enter to continue:"
+# Only prompt when run interactively, so non-interactive/CI runs don't hang.
+if [ -t 0 ]; then
+    read -p "Please ensure HTTPS certificates for NGINX are in place. Press enter to continue:" _
+else
+    echo "Non-interactive run: assuming HTTPS certificates for NGINX are already in place."
+fi
 systemctl restart redis
 systemctl restart nginx
 systemctl restart supervisord
