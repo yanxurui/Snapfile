@@ -72,8 +72,11 @@ def main():
     try:
         app = init_app()
     except SystemExit as e:
+        # e.g. the client hasn't been built yet. Surface the real, actionable
+        # error instead of falling through to run_app() with `app` unbound
+        # (which would raise an opaque UnboundLocalError).
         log.exception('Failed to start!!')
-        # raise
+        raise
     web.run_app(app, port=config.PORT)
 
 

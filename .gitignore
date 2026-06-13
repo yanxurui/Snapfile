@@ -1,8 +1,16 @@
 upload
+upload_e2e
 dump.rdb
 
 client/node_modules/
 client/dist/
+
+# Playwright (end-to-end tests)
+client/test-results/
+client/playwright-report/
+client/playwright/.cache/
+test-results/
+playwright-report/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

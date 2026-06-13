@@ -171,3 +171,19 @@ Functional test for NGINX config in a production environment.
 
 #### benchmark.py
 stress test for aiohttp.
+
+#### End-to-end tests (Playwright)
+Browser-level tests that drive the built Vue client against the real backend
+(HTTP + WebSocket + Redis), covering creating/opening a folder, sending
+messages, uploading and downloading files, real-time sync and sharing.
+
+```sh
+cd client
+npm install
+npx playwright install chromium   # one-time browser download
+npm run test:e2e                  # builds the client, then runs the suite
+```
+
+Each run starts its own isolated, in-memory Redis and backend (`ENV=E2E`), so it
+never touches your dev/prod data. `redis-server` must be on your `PATH`. See
+`client/tests/e2e/README.md` for details.
