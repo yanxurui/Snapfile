@@ -45,10 +45,12 @@ jobs:
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          rm -rf pkg && mkdir -p pkg/static pkg/server
+          rm -rf pkg && mkdir -p pkg/static pkg/server pkg/deploy
           cp -R client/dist/. pkg/static/
           # backend source needed to `pip install` on the host (no build there)
           cp -R server/setup.py server/MANIFEST.in server/snapfile pkg/server/
+          # nginx/supervisor configs, so the installer manages them per-release
+          cp deploy/snapfile.conf deploy/supervisord.ini pkg/deploy/
           tar -czf "snapfile-${VERSION}.tar.gz" -C pkg .
           echo "Artifact contents:" && tar -tzf "snapfile-${VERSION}.tar.gz" | head -20
 

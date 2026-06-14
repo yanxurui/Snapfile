@@ -83,10 +83,12 @@ atomic symlink flip:
     |-- releases
     |   |-- v1.0.0
     |   |   |-- static   (prebuilt Vue client, served by NGINX)
-    |   |   `-- server   (backend source, pip-installed)
+    |   |   |-- server   (backend source, pip-installed)
+    |   |   `-- deploy   (nginx/supervisor configs for this version)
     |   `-- v1.1.0
     |       |-- static
-    |       `-- server
+    |       |-- server
+    |       `-- deploy
     |-- current -> releases/v1.1.0
     |-- static  -> current/static    (NGINX root)
     |-- files   (uploads — shared across versions)
@@ -94,11 +96,16 @@ atomic symlink flip:
     `-- logs
 ```
 
-> The first run also installs prerequisites (nginx/redis/supervisor), creates the
-> directories, and sets up the redis/nginx/supervisor config (it won't clobber an
-> existing nginx config, so local customizations are preserved). In production
-> (`ENV=PROD`) NGINX serves the static files; the Python backend only serves the
-> APIs and websocket.
+> The nginx/supervisor configs are **versioned with each release** (`deploy/` in
+> the artifact). On every deploy/rollback the installer repoints
+> `/etc/nginx/conf.d/snapfile.conf` and `/etc/supervisord.d/snapfile.ini` at the
+> active release's configs, runs `nginx -t` and reloads (restoring the previous
+> config if the test fails), and `supervisorctl reread && update`. So config
+> changes ship through the repo like everything else. Host-specific tweaks (e.g.
+> the shared `$connection_upgrade` map) live in `deploy/snapfile.conf`. The first
+> run also installs prerequisites and creates the directories. In production
+> (`ENV=PROD`) NGINX serves the static files; the backend only serves the APIs
+> and websocket.
 
 
 ## Development
