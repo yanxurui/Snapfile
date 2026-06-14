@@ -109,8 +109,10 @@ activate() {
     local version="$1" new="$prefix/releases/$1"
     [ -d "$new" ] || die "release $version is not installed."
 
-    # remember the release we're leaving, for rollback
-    if [ -L "$prefix/current" ]; then
+    # remember the release we're leaving, for rollback — but only when actually
+    # switching versions, so re-deploying the current version doesn't make
+    # `previous` point at itself.
+    if [ -L "$prefix/current" ] && [ "$(readlink "$prefix/current")" != "$new" ]; then
         ln -sfn "$(readlink "$prefix/current")" "$prefix/previous.tmp"
         mv -Tf "$prefix/previous.tmp" "$prefix/previous"
     fi
@@ -162,10 +164,18 @@ restart_app() {
 
 health_check() {
     log "health check..."
-    local backend
-    backend="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:8080/auth || echo 000)"
-    [ "$backend" = "401" ] || [ "$backend" = "200" ] \
-        || die "backend not healthy (got HTTP $backend from :8080/auth)"
+    local backend="000" i
+    # poll: the backend needs a few seconds to bind :8080 after a restart
+    # (more so when link_configs changed the supervisord config and it bounced).
+    for i in $(seq 1 30); do
+        backend="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:8080/auth || echo 000)"
+        case "$backend" in 200|401) break ;; esac
+        sleep 1
+    done
+    case "$backend" in
+        200|401) ;;
+        *) die "backend not healthy after ~30s (last HTTP $backend from :8080/auth)" ;;
+    esac
     local site
     site="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTHCHECK_URL" || echo 000)"
     [ "$site" = "200" ] || warn "site check returned HTTP $site for $HEALTHCHECK_URL"
