@@ -34,7 +34,6 @@ KEEP_RELEASES=5
 HEALTHCHECK_URL="${HEALTHCHECK_URL:-https://snapfile.yanxurui.cc/login.html}"
 
 PIP="/home/$user/.pyenv/versions/$pyversion/bin/pip"
-DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 log()  { echo -e "\033[1;32m[deploy]\033[0m $*"; }
 warn() { echo -e "\033[1;33m[deploy]\033[0m $*" >&2; }
@@ -62,15 +61,10 @@ ensure_host() {
         grep -q "^dir ${prefix}/db" /etc/redis.conf || sed -i "s|^dir .*|dir ${prefix}/db|" /etc/redis.conf
     fi
 
-    # nginx/supervisor configs: only create if absent, so local customizations
-    # (e.g. a shared map in conf.d/common.conf, IPv6 listen) are preserved.
-    if [ ! -e /etc/nginx/conf.d/snapfile.conf ]; then
-        ln -s "$DEPLOY_DIR/snapfile.conf" /etc/nginx/conf.d/snapfile.conf
-    fi
-    if [ ! -e /etc/supervisord.d/snapfile.ini ]; then
-        ln -s "$DEPLOY_DIR/supervisord.ini" /etc/supervisord.d/snapfile.ini
-        systemctl restart supervisord || true
-    fi
+    # make sure the services are running (no-op if already up)
+    systemctl enable --now nginx redis supervisord >/dev/null 2>&1 || true
+    # The nginx/supervisor configs are shipped in each release and pointed at
+    # per-release by link_configs() — not symlinked from the repo here.
 }
 
 # ---- fetch a release into releases/<version> -------------------------------
@@ -95,8 +89,8 @@ fetch_release() {
     mkdir -p "$dir"
     tar -xzf "$tarball" -C "$dir"
     rm -f "$tarball"
-    [ -f "$dir/static/index.html" ] && [ -f "$dir/server/setup.py" ] \
-        || die "artifact for $version is missing static/ or server/"
+    [ -f "$dir/static/index.html" ] && [ -f "$dir/server/setup.py" ] && [ -f "$dir/deploy/snapfile.conf" ] \
+        || die "artifact for $version is missing static/, server/ or deploy/"
     chown -R "$user" "$dir"
     log "unpacked release $version"
 }
@@ -133,6 +127,32 @@ activate() {
     mv -Tf "$prefix/static.tmp" "$prefix/static"
     chown -h "$user" "$prefix/current" "$prefix/static" 2>/dev/null || true
     log "active release is now $version"
+}
+
+# ---- point nginx/supervisor at the active release's configs ----------------
+link_configs() {
+    local active conf
+    active="$(readlink "$prefix/current")"   # absolute releases/<version>
+    conf="$active/deploy"
+    log "linking nginx/supervisor configs to $(basename "$active")..."
+
+    # nginx: stage the new (version-pinned) symlink, validate, then reload.
+    # On failure, restore the previous config so a bad release can never take
+    # the site down or block a future nginx restart.
+    cp -aP /etc/nginx/conf.d/snapfile.conf /etc/nginx/conf.d/snapfile.conf.prev 2>/dev/null || true
+    ln -sfn "$conf/snapfile.conf" /etc/nginx/conf.d/snapfile.conf
+    if nginx -t; then
+        systemctl reload nginx
+        rm -f /etc/nginx/conf.d/snapfile.conf.prev
+    else
+        [ -e /etc/nginx/conf.d/snapfile.conf.prev ] \
+            && mv -f /etc/nginx/conf.d/snapfile.conf.prev /etc/nginx/conf.d/snapfile.conf
+        die "nginx config test failed for this release; restored the previous config and aborted"
+    fi
+
+    # supervisor: update the program config; `update` restarts only if it changed
+    ln -sfn "$conf/supervisord.ini" /etc/supervisord.d/snapfile.ini
+    supervisorctl reread >/dev/null 2>&1 && supervisorctl update >/dev/null 2>&1 || true
 }
 
 restart_app() {
@@ -179,6 +199,7 @@ deploy() {
     fetch_release "$version"
     install_backend "$version"
     activate "$version"
+    link_configs
     restart_app
     health_check
     prune_releases
@@ -192,6 +213,7 @@ rollback() {
     log "rolling back to $version ..."
     install_backend "$version"
     activate "$version"
+    link_configs
     restart_app
     health_check
     log "rolled back to $version"
