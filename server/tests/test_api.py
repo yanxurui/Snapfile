@@ -6,7 +6,7 @@ import json
 import unittest
 import subprocess
 from time import sleep
-from collections import Iterable
+from collections.abc import Iterable
 
 import requests
 import websocket # websocket_client
