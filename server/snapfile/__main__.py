@@ -50,11 +50,15 @@ def init_app():
     if not config.PROD:
         repo_root = os.path.abspath(os.path.join(dir_path, '..', '..'))
         static_root = os.path.join(repo_root, 'client', 'dist')
-        if not os.path.isdir(static_root):
-            log.error("Static assets directory not found at '%s'", static_root)
-            log.error("Please run 'npm run build' in the 'client' directory first.")
-            sys.exit(1)
-        log.info("Serving static files from '%s'", static_root)
+        if os.path.isdir(static_root):
+            log.info("Serving static files from '%s'", static_root)
+        else:
+            # The client may not be built (e.g. when running the API tests).
+            # Don't abort — serve the APIs and just note the UI isn't available.
+            # An empty dir keeps the static route (and router['static']) valid.
+            log.warning("Static assets not found at '%s'; the web UI won't be served. "
+                        "Run 'npm run build' in 'client/' to build it.", static_root)
+            os.makedirs(static_root, exist_ok=True)
         routes.append(web.static('/', static_root, name='static'))
 
     app.add_routes(routes)
@@ -72,8 +76,11 @@ def main():
     try:
         app = init_app()
     except SystemExit as e:
+        # e.g. the client hasn't been built yet. Surface the real, actionable
+        # error instead of falling through to run_app() with `app` unbound
+        # (which would raise an opaque UnboundLocalError).
         log.exception('Failed to start!!')
-        # raise
+        raise
     web.run_app(app, port=config.PORT)
 
 

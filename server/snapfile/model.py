@@ -85,9 +85,9 @@ async def startup(app):
     if not config.PROD:
         await redis.flushdb()
         delete(config.UPLOAD_ROOT_DIRECTORY)
-    if not os.path.isdir(config.UPLOAD_ROOT_DIRECTORY):
-        os.mkdir(config.UPLOAD_ROOT_DIRECTORY)
-        # raise SystemExit('Upload path "%s" does not exist.' % config.UPLOAD_ROOT_DIRECTORY)
+    # makedirs (not mkdir) so an isolated, possibly nested upload root (e.g. the
+    # e2e SNAPFILE_UPLOAD) can be created even if its parent doesn't exist yet.
+    os.makedirs(config.UPLOAD_ROOT_DIRECTORY, exist_ok=True)
     # add some quick or long running tasks
     asyncio.create_task(remove_expired_folders(app))
 

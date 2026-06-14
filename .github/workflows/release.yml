@@ -1,0 +1,67 @@
+name: Release
+
+# Cut a release by pushing a tag like v1.2.3 (or run manually with a version).
+# Produces a prebuilt, deployable artifact so the production host never builds.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to build (e.g. v1.2.3)'
+        required: true
+
+permissions:
+  contents: write   # needed to create the GitHub Release
+
+jobs:
+  release:
+    name: Build & publish release artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build client
+        working-directory: client
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package deployable artifact (prebuilt static + backend source)
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          rm -rf pkg && mkdir -p pkg/static pkg/server
+          cp -R client/dist/. pkg/static/
+          # backend source needed to `pip install` on the host (no build there)
+          cp -R server/setup.py server/MANIFEST.in server/snapfile pkg/server/
+          tar -czf "snapfile-${VERSION}.tar.gz" -C pkg .
+          echo "Artifact contents:" && tar -tzf "snapfile-${VERSION}.tar.gz" | head -20
+
+      - name: Create / update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            git tag -f "$VERSION" && git push origin "$VERSION" || true
+          fi
+          gh release view "$VERSION" >/dev/null 2>&1 \
+            && gh release upload "$VERSION" "snapfile-${VERSION}.tar.gz" --clobber \
+            || gh release create "$VERSION" "snapfile-${VERSION}.tar.gz" \
+                 --title "$VERSION" \
+                 --generate-notes
