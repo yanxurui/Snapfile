@@ -179,11 +179,20 @@ python -m unittest -v test_api.py
 
 some known issues:
 
-The error below is due to a bug in package requests: [Revert PR 1440, do not modify cookie value by yanxurui · Pull Request #5459 · psf/requests](https://github.com/psf/requests/pull/5459)
+The error below was due to a bug in package requests, which re-encodes the
+quoted JSON value stored in the session cookie by `SimpleCookieStorage` so the
+server can no longer decode it: [Revert PR 1440, do not modify cookie value by yanxurui · Pull Request #5459 · psf/requests](https://github.com/psf/requests/pull/5459) (rejected upstream — "too ingrained to revert in 2.x").
 
 ```
 json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
 ```
+
+The test client now works around this by sending the session cookie verbatim
+(the same way the websocket helper does), so a patched `requests` is no longer
+required. This could also be fixed permanently at the source by switching the
+session middleware from `SimpleCookieStorage` to `EncryptedCookieStorage`: it
+base64-encodes the cookie value, so it contains no quotes/special characters for
+`requests` to mangle — fixing it for any HTTP client, not just the tests.
 
 There might be a chance that test_api.TestExpire fails because the orphan process is cleang the data.
 ```
