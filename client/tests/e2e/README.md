@@ -1,8 +1,8 @@
 # Browser tests (Playwright)
 
-Chromium drives the built Vue client through a local TLS/HTTP2 proxy to aiohttp
-and isolated Redis. Tests cover login/sharing, encrypted chat and file transfers,
-including errors, quotas, cancellation and authenticated downloads.
+Chromium drives Vue through TLS/H2 to aiohttp and private Redis. `files.spec.js`
+covers file UI; `encryption.spec.js` covers browser/storage/streaming integration.
+Format, boundary and tamper matrices belong in [crypto.test.js](../crypto.test.js).
 See the [encryption guide](../../../docs/file-encryption.md) for protocol details.
 
 ## Setup and commands

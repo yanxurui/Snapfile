@@ -1,19 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
-import { createFolder, uploadFile, messageRow, waitForReady, installDiskPicker, diskBytes } from './helpers.js';
-
-async function storedFiles() {
-  const runtime = JSON.parse(await readFile(resolve(`../.cache/e2e-${process.env.E2E_HTTPS_PORT || '8443'}.json`), 'utf8'));
-  const root = join(runtime.directory, 'uploads');
-  const names = await readdir(root, { recursive: true });
-  const files = [];
-  for (const name of names) {
-    const path = join(root, name);
-    if ((await stat(path).catch(() => null))?.isFile()) files.push(path);
-  }
-  return files;
-}
+import { readFile, stat, writeFile } from 'node:fs/promises';
+import { createFolder, uploadFile, messageRow, waitForReady, installDiskPicker, diskBytes, storedFiles } from './helpers.js';
 
 test('secure H2 upload, ciphertext storage, private metadata and short-fragment key recovery', async ({ page, browser }) => {
   await installDiskPicker(page);
@@ -60,20 +47,6 @@ test('secure H2 upload, ciphertext storage, private metadata and short-fragment 
   await guest.close();
 });
 
-for (const size of [0, 1048575, 1048576, 1048577, 3145747]) {
-  test(`browser disk round trip at ${size} bytes`, async ({ page }) => {
-    await installDiskPicker(page);
-    await createFolder(page);
-    const name = `boundary-${size}.bin`;
-    const data = Buffer.alloc(size);
-    for (let i = 0; i < size; i++) data[i] = (i * 37) % 251;
-    await uploadFile(page, name, data);
-    await messageRow(page, name).locator('a').click();
-    await expect(page.getByRole('status')).toContainText('authenticated download complete');
-    expect(Buffer.from(await diskBytes(page, name))).toEqual(data);
-  });
-}
-
 test('failed login sends only the authentication token without protocol negotiation', async ({ page }) => {
   const requests = [];
   page.on('request', request => {
@@ -102,92 +75,42 @@ test('stale multipart clients cannot store plaintext files', async ({ page }) =>
   await expect(messageRow(page, 'stale.txt')).toHaveCount(0);
 });
 
-for (const corruption of ['bit flip', 'truncate final', 'trailing bytes', 'reorder records']) {
-  test(`download aborts real disk writes on ${corruption}`, async ({ page }) => {
-    await installDiskPicker(page);
-    await createFolder(page);
-    const before = new Set(await storedFiles());
-    const name = 'corrupt.bin';
-    await uploadFile(page, name, Buffer.alloc(2 * 1048576 + 7, 19));
-    await expect(messageRow(page, name)).toBeVisible();
-    const path = (await storedFiles()).find(file => !before.has(file));
-    const bytes = await readFile(path);
-    if (corruption === 'bit flip') bytes[1048700] ^= 1;
-    let altered = bytes;
-    if (corruption === 'truncate final') altered = bytes.subarray(0, -21);
-    if (corruption === 'trailing bytes') altered = Buffer.concat([bytes, Buffer.from([1])]);
-    if (corruption === 'reorder records') {
-      const end = 32 + 1048576 + 21;
-      altered = Buffer.concat([bytes.subarray(0, 32), bytes.subarray(end, end + 1048576 + 21),
-        bytes.subarray(32, end), bytes.subarray(end + 1048576 + 21)]);
-    }
-    await writeFile(path, altered);
-    // Existing user file must survive a failed authenticated download.
-    await page.evaluate(async (name) => {
-      const root = await navigator.storage.getDirectory();
-      const handle = await root.getFileHandle(name, { create: true });
-      const writer = await handle.createWritable();
-      await writer.write('keep original');
-      await writer.close();
-    }, name);
-    await messageRow(page, name).locator('a').click();
-    await expect(page.getByRole('status')).toContainText('Download failed');
-    expect(Buffer.from(await diskBytes(page, name)).toString()).toBe('keep original');
-  });
-}
-
-test('missing disk API gives an explicit error instead of buffering a Blob', async ({ page }) => {
-  await page.addInitScript(() => { window.showSaveFilePicker = undefined; });
-  await createFolder(page);
-  await uploadFile(page, 'no-fallback.bin', 'abc');
-  await messageRow(page, 'no-fallback.bin').locator('a').click();
-  await expect(page.getByRole('status')).toContainText('No in-memory fallback');
-});
-
-test('canceling an active UI download aborts without replacing the destination', async ({ page }) => {
+test('authentication failure after a real disk write aborts and preserves the destination', async ({ page }) => {
   await installDiskPicker(page);
   await createFolder(page);
-  await uploadFile(page, 'cancel-download.bin', Buffer.alloc(3 * 1048576, 12));
-  await expect(messageRow(page, 'cancel-download.bin')).toBeVisible();
-  await page.evaluate(async () => {
-    const root = await navigator.storage.getDirectory();
-    const handle = await root.getFileHandle('cancel-download.bin', { create: true });
-    const writer = await handle.createWritable();
-    await writer.write('original destination');
-    await writer.close();
-  });
-
-  await page.route('**/files?id=*', route => route.continue({
-    headers: { ...route.request().headers(), 'x-e2e-slow-download': '1' }
-  }));
-  await messageRow(page, 'cancel-download.bin').locator('a').click();
-  await expect(page.getByRole('status')).toContainText('Downloading and authenticating');
-  await page.getByRole('button', { name: 'Cancel download' }).click();
-  await expect(page.getByRole('status')).toContainText('Download canceled');
-  expect(Buffer.from(await diskBytes(page, 'cancel-download.bin')).toString()).toBe('original destination');
-});
-
-test('Cancel upload removes partial ciphertext and allows a new upload', async ({ page }) => {
-  await createFolder(page);
   const before = new Set(await storedFiles());
-  await page.route('**/files/*', route => route.continue({
-    headers: { ...route.request().headers(), 'x-e2e-slow-upload': '1' }
-  }));
-  await uploadFile(page, 'cancel-upload.bin', Buffer.alloc(8 * 1048576, 9));
-  await expect.poll(async () => {
-    const partial = (await storedFiles()).find(file => !before.has(file) && file.endsWith('.part'));
-    return partial ? (await stat(partial)).size : 0;
-  }).toBeGreaterThan(0);
-  await page.locator('#cancel').click();
-  await expect(page.locator('.percent')).toContainText('Canceled');
-  await expect(page.locator('.percent')).not.toHaveClass(/upload-error/);
-  await expect(page.locator('.percent')).not.toHaveCSS('color', 'rgb(176, 0, 32)');
-  await expect.poll(async () => (await storedFiles()).filter(file => !before.has(file)).length).toBe(0);
-  await expect(messageRow(page, 'cancel-upload.bin')).toHaveCount(0);
-  await uploadFile(page, 'after-cancel.txt', 'retry works');
-  await expect(messageRow(page, 'after-cancel.txt')).toBeVisible();
-  await expect(page.locator('.percent')).toContainText('Success');
-  await expect(page.locator('.percent')).not.toHaveClass(/upload-error/);
+  const name = 'corrupt.bin';
+  await uploadFile(page, name, Buffer.alloc(2 * 1048576 + 7, 19));
+  await expect(messageRow(page, name)).toBeVisible();
+  const path = (await storedFiles()).find(file => !before.has(file));
+  const bytes = await readFile(path);
+  bytes[1048700] ^= 1; // Corrupt the second record, after one authenticated write.
+  await writeFile(path, bytes);
+  await page.evaluate(async (name) => {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle(name, { create: true });
+    const writer = await handle.createWritable();
+    await writer.write('keep original');
+    await writer.close();
+  }, name);
+  await page.evaluate(async () => {
+    window.diskWrites = 0;
+    window.diskAborts = 0;
+    const getWriter = FileSystemWritableFileStream.prototype.getWriter;
+    FileSystemWritableFileStream.prototype.getWriter = function () {
+      const writer = getWriter.call(this);
+      const write = writer.write.bind(writer);
+      const abort = writer.abort.bind(writer);
+      writer.write = async chunk => { await write(chunk); window.diskWrites += chunk.byteLength; };
+      writer.abort = async reason => { await abort(reason); window.diskAborts += 1; };
+      return writer;
+    };
+  });
+  await messageRow(page, name).locator('a').click();
+  await expect(page.getByRole('status')).toContainText('Download failed');
+  expect(await page.evaluate(() => ({ bytes: window.diskWrites, aborts: window.diskAborts })))
+    .toEqual({ bytes: 1048576, aborts: 1 });
+  expect(Buffer.from(await diskBytes(page, name)).toString()).toBe('keep original');
 });
 
 test('64 MiB streaming reaches disk early, obeys network backpressure and cancels cleanly', async ({ page }) => {
@@ -314,34 +237,4 @@ test('HTTP1-only localhost fails visibly without falling back to a buffered uplo
   await expect(page.locator('.percent')).toContainText('HTTP/2 or HTTP/3');
   await expect(page.locator('.percent')).toHaveClass(/upload-error/);
   await expect(messageRow(page, 'http1.bin')).toHaveCount(0);
-});
-
-test('wrong metadata key aborts a real disk destination', async ({ page }) => {
-  await createFolder(page);
-  await page.goto('/tests/e2e/stream.html');
-  await page.waitForFunction(() => !!window.streams);
-  const result = await page.evaluate(async () => {
-    const streams = window.streams;
-    const { key } = await streams.credentials(localStorage.getItem('identity'));
-    const wrong = (await streams.credentials('wrongkey')).key;
-    const file = await streams.encryptFile(new File(['secret'], 'wrong.bin'), key);
-    const admitted = await fetch('/files', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ size: file.size, metadata: file.metadata }) });
-    const { token } = await admitted.json();
-    const uploaded = await fetch(`/files/${token}`, { method: 'PUT', duplex: 'half',
-      headers: { 'Content-Type': 'application/octet-stream' }, body: file.body });
-    const { id } = await uploaded.json();
-    const root = await navigator.storage.getDirectory();
-    const handle = await root.getFileHandle('wrong.bin', { create: true });
-    const previous = await handle.createWritable();
-    await previous.write('original');
-    await previous.close();
-    const response = await fetch(`/files?id=${id}`);
-    let rejected = false;
-    try {
-      await streams.decryptFile(response.body, file.metadata, wrong, await handle.createWritable());
-    } catch { rejected = true; }
-    return { rejected, content: await (await handle.getFile()).text() };
-  });
-  expect(result).toEqual({ rejected: true, content: 'original' });
 });

@@ -1,5 +1,7 @@
 // @ts-check
 import { expect } from '@playwright/test';
+import { readFile, readdir, stat } from 'node:fs/promises';
+import { resolve, join } from 'node:path';
 
 /**
  * Shared helpers for the Snapfile end-to-end suite. They drive the real UI the
@@ -58,6 +60,22 @@ export async function diskBytes(page, name) {
     const handle = await directory.getFileHandle(name);
     return Array.from(new Uint8Array(await (await handle.getFile()).arrayBuffer()));
   }, name);
+}
+
+export async function storedFiles() {
+  const runtime = JSON.parse(await readFile(resolve(`../.cache/e2e-${process.env.E2E_HTTPS_PORT || '8443'}.json`), 'utf8'));
+  const root = join(runtime.directory, 'uploads');
+  const names = await readdir(root, { recursive: true });
+  const files = [];
+  for (const name of names) {
+    const path = join(root, name);
+    const info = await stat(path).catch(error => {
+      if (error.code === 'ENOENT') return null; // A partial upload may have been removed.
+      throw error;
+    });
+    if (info?.isFile()) files.push(path);
+  }
+  return files;
 }
 
 /** Type a message and send it via the Send button (waits for the socket to be ready). */

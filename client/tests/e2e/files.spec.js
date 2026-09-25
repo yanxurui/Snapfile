@@ -1,6 +1,7 @@
 // @ts-check
 import { test, expect } from '@playwright/test';
-import { createFolder, uploadFile, uploadFiles, messageRow, installDiskPicker, diskBytes } from './helpers.js';
+import { stat } from 'node:fs/promises';
+import { createFolder, uploadFile, uploadFiles, messageRow, installDiskPicker, diskBytes, storedFiles } from './helpers.js';
 
 test.describe('files', () => {
   test('upload a file and see it in the message list', async ({ page }) => {
@@ -23,25 +24,17 @@ test.describe('files', () => {
     await expect(page.locator('.percent')).not.toHaveCSS('color', 'rgb(176, 0, 32)');
   });
 
-  test('larger files show a human-readable (KB-scaled) size', async ({ page }) => {
-    await createFolder(page);
-
-    // 2500 bytes -> server format_size() -> "2.5K" (1000-based scaling).
-    await uploadFile(page, 'big.txt', 'x'.repeat(2500));
-
-    await expect(messageRow(page, 'big.txt')).toContainText('2.5K');
-  });
-
-  test('upload multiple files at once', async ({ page }) => {
+  test('upload multiple files and display human-readable sizes', async ({ page }) => {
     await createFolder(page);
 
     await uploadFiles(page, [
       { name: 'first.txt', content: 'aaa' },
-      { name: 'second.txt', content: 'bbbbbb' },
+      { name: 'second.txt', content: 'x'.repeat(2500) },
     ]);
 
     await expect(messageRow(page, 'first.txt')).toBeVisible();
     await expect(messageRow(page, 'second.txt')).toBeVisible();
+    await expect(messageRow(page, 'second.txt')).toContainText('2.5K');
     await expect(messageRow(page, 'first.txt').locator('a')).toBeVisible();
     await expect(messageRow(page, 'second.txt').locator('a')).toBeVisible();
     await expect(page.locator('.percent')).toContainText('Success: 2 file(s) uploaded');
@@ -189,19 +182,76 @@ test.describe('files', () => {
     });
   }
 
-  test('download an uploaded file and get its original content back', async ({ page }) => {
+  test('download an empty file with an activated disk picker', async ({ page }) => {
     await installDiskPicker(page);
     await createFolder(page);
-
-    const content = 'round-trip payload — ' + 'x'.repeat(200);
-    await uploadFile(page, 'download-me.txt', content);
-
-    const link = messageRow(page, 'download-me.txt').locator('a');
+    await uploadFile(page, 'empty.bin', '');
+    const link = messageRow(page, 'empty.bin').locator('a');
     await expect(link).toBeVisible();
-
+    await page.evaluate(async () => {
+      const root = await navigator.storage.getDirectory();
+      const handle = await root.getFileHandle('empty.bin', { create: true });
+      const writer = await handle.createWritable();
+      await writer.write('replace with an authenticated empty file');
+      await writer.close();
+    });
     await link.click();
     await expect(page.getByRole('status')).toContainText('authenticated download complete');
     expect(await page.evaluate(() => window.pickerHadActivation)).toBe(true);
-    expect(Buffer.from(await diskBytes(page, 'download-me.txt')).toString()).toBe(content);
+    expect(await diskBytes(page, 'empty.bin')).toEqual([]);
+  });
+
+  test('missing disk API gives an explicit error instead of buffering a Blob', async ({ page }) => {
+    await page.addInitScript(() => { window.showSaveFilePicker = undefined; });
+    await createFolder(page);
+    await uploadFile(page, 'no-fallback.bin', 'abc');
+    await messageRow(page, 'no-fallback.bin').locator('a').click();
+    await expect(page.getByRole('status')).toContainText('No in-memory fallback');
+  });
+
+  test('canceling an active UI download aborts without replacing the destination', async ({ page }) => {
+    await installDiskPicker(page);
+    await createFolder(page);
+    await uploadFile(page, 'cancel-download.bin', Buffer.alloc(3 * 1048576, 12));
+    await expect(messageRow(page, 'cancel-download.bin')).toBeVisible();
+    await page.evaluate(async () => {
+      const root = await navigator.storage.getDirectory();
+      const handle = await root.getFileHandle('cancel-download.bin', { create: true });
+      const writer = await handle.createWritable();
+      await writer.write('original destination');
+      await writer.close();
+    });
+
+    await page.route('**/files?id=*', route => route.continue({
+      headers: { ...route.request().headers(), 'x-e2e-slow-download': '1' }
+    }));
+    await messageRow(page, 'cancel-download.bin').locator('a').click();
+    await expect(page.getByRole('status')).toContainText('Downloading and authenticating');
+    await page.getByRole('button', { name: 'Cancel download' }).click();
+    await expect(page.getByRole('status')).toContainText('Download canceled');
+    expect(Buffer.from(await diskBytes(page, 'cancel-download.bin')).toString()).toBe('original destination');
+  });
+
+  test('Cancel upload removes partial ciphertext and allows a new upload', async ({ page }) => {
+    await createFolder(page);
+    const before = new Set(await storedFiles());
+    await page.route('**/files/*', route => route.continue({
+      headers: { ...route.request().headers(), 'x-e2e-slow-upload': '1' }
+    }));
+    await uploadFile(page, 'cancel-upload.bin', Buffer.alloc(8 * 1048576, 9));
+    await expect.poll(async () => {
+      const partial = (await storedFiles()).find(file => !before.has(file) && file.endsWith('.part'));
+      return partial ? (await stat(partial)).size : 0;
+    }).toBeGreaterThan(0);
+    await page.locator('#cancel').click();
+    await expect(page.locator('.percent')).toContainText('Canceled');
+    await expect(page.locator('.percent')).not.toHaveClass(/upload-error/);
+    await expect(page.locator('.percent')).not.toHaveCSS('color', 'rgb(176, 0, 32)');
+    await expect.poll(async () => (await storedFiles()).filter(file => !before.has(file)).length).toBe(0);
+    await expect(messageRow(page, 'cancel-upload.bin')).toHaveCount(0);
+    await uploadFile(page, 'after-cancel.txt', 'retry works');
+    await expect(messageRow(page, 'after-cancel.txt')).toBeVisible();
+    await expect(page.locator('.percent')).toContainText('Success');
+    await expect(page.locator('.percent')).not.toHaveClass(/upload-error/);
   });
 });
