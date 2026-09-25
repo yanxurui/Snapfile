@@ -3,7 +3,7 @@ import logging
 from aiohttp import web
 from aiohttp_security.abc import AbstractAuthorizationPolicy
 
-from .model import Folder
+from .model import Folder, InvalidFolderData
 
 
 log = logging.getLogger(__name__)
@@ -35,14 +35,14 @@ class SimpleAuthorizationPolicy(AbstractAuthorizationPolicy):
         pass
 
 
-async def login(cache, passcode):
-    """Check login credentials & Login the user
-    this function usually takes username & password and verifies this is a registered user
-    then returns an identity string that survives in this session.
-    Since there is no user concept in this app, the hash of the folder id (passcode) is
-    treated as identity for simplicity.
-    """
-    folder = await Folder.login(passcode)
+async def login(cache, credential):
+    """Authenticate using only the browser-derived token, never the passcode."""
+    try:
+        folder = await Folder.login(credential)
+    except InvalidFolderData as error:
+        cache.pop(Folder.identity_for(credential), None)
+        log.warning('Login rejected: %s', error)
+        raise web.HTTPConflict(text=str(error))
     if folder is None:
         log.warning('wrong identity')
         raise web.HTTPUnauthorized()
@@ -54,4 +54,3 @@ async def login(cache, passcode):
         # do not overwrite the cache because otherwise it will lose previous connections
         cache[identity] = folder
     return identity
-

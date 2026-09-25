@@ -14,7 +14,8 @@ import aiohttp_security
 
 from . import model
 from .auth import SimpleAuthorizationPolicy
-from .views import signup, login, logout, allow, index, ws, upload, download
+from .views import signup, login, logout, allow, index, ws, download
+from . import uploads
 
 
 log = logging.getLogger(__name__)
@@ -41,8 +42,10 @@ def init_app():
         web.post('/login', login),
         web.post('/logout', logout),
         web.get('/auth', allow),
-        web.post('/files', upload),
         web.get('/files', download),
+        web.post('/uploads', uploads.admit),
+        web.put('/uploads/{token}', uploads.upload),
+        web.delete('/uploads/{token}', uploads.cancel),
         web.get('/', index, name='index'), # static does not support redirect / to /index.html
         web.get('/index.html', index), # serve a single static file with auth
     ]
@@ -81,7 +84,8 @@ def main():
         # (which would raise an opaque UnboundLocalError).
         log.exception('Failed to start!!')
         raise
-    web.run_app(app, port=config.PORT)
+    host = '127.0.0.1' if config.ENV in ('TEST', 'E2E') else None
+    web.run_app(app, host=host, port=config.PORT)
 
 
 if __name__ == '__main__':

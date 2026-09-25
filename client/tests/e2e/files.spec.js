@@ -1,7 +1,6 @@
 // @ts-check
-import { readFile } from 'node:fs/promises';
 import { test, expect } from '@playwright/test';
-import { createFolder, uploadFile, uploadFiles, messageRow } from './helpers.js';
+import { createFolder, uploadFile, uploadFiles, messageRow, installDiskPicker, diskBytes } from './helpers.js';
 
 test.describe('files', () => {
   test('upload a file and see it in the message list', async ({ page }) => {
@@ -12,7 +11,7 @@ test.describe('files', () => {
     const row = messageRow(page, 'e2e-note.txt');
     await expect(row).toBeVisible();
     // The file row renders a clickable download link and the formatted size.
-    await expect(row.locator('a')).toHaveAttribute('href', /\/files\?id=\d+&name=e2e-note\.txt/);
+    await expect(row.locator('a')).toHaveAttribute('href', '#');
     await expect(row).toContainText(`${bytes}.0B`);
 
     // The upload status line confirms success with the server's file count.
@@ -46,8 +45,16 @@ test.describe('files', () => {
   test('an over-quota upload is rejected with an error', async ({ page }) => {
     await createFolder(page);
 
-    // The E2E quota is 10 MB (STORAGE_PER_FOLDER); exceed it.
-    await uploadFile(page, 'too-big.bin', 'x'.repeat(11 * 1000 * 1000));
+    // Admission must reject without reading or encrypting the oversized file.
+    await page.evaluate(() => {
+      const file = new File(['small'], 'too-big.bin');
+      Object.defineProperty(file, 'size', { value: 100 * 1024 * 1024 });
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      const input = document.querySelector('input[type=file]');
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change'));
+    });
 
     await expect(page.locator('.percent')).toContainText('Storage space not enough');
     // ...and the rejected file does not appear in the message list.
@@ -55,6 +62,7 @@ test.describe('files', () => {
   });
 
   test('download an uploaded file and get its original content back', async ({ page }) => {
+    await installDiskPicker(page);
     await createFolder(page);
 
     const content = 'round-trip payload — ' + 'x'.repeat(200);
@@ -63,16 +71,9 @@ test.describe('files', () => {
     const link = messageRow(page, 'download-me.txt').locator('a');
     await expect(link).toBeVisible();
 
-    const [download] = await Promise.all([
-      page.waitForEvent('download'),
-      link.click(),
-    ]);
-
-    expect(download.suggestedFilename()).toBe('download-me.txt');
-    const path = await download.path();
-    expect(path).toBeTruthy();
-    const downloaded = await readFile(/** @type {string} */ (path), 'utf-8');
-    // Verifies the full encrypt-on-upload / decrypt-on-download round trip.
-    expect(downloaded).toBe(content);
+    await link.click();
+    await expect(page.getByRole('status')).toContainText('authenticated download complete');
+    expect(await page.evaluate(() => window.pickerHadActivation)).toBe(true);
+    expect(Buffer.from(await diskBytes(page, 'download-me.txt')).toString()).toBe(content);
   });
 });

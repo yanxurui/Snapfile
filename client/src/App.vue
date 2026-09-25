@@ -12,7 +12,7 @@
     </div>
 
     <div id="middle" ref="messageContainer">
-      <MessageTable :messages="messages" />
+      <MessageTable :messages="messages" @download="downloadEncryptedFile" />
     </div>
 
     <div id="bottom">
@@ -41,6 +41,12 @@
           Send message
         </button>
       </div>
+      <p v-if="messageError" class="message-error" role="alert">{{ messageError }}</p>
+      <div v-if="downloading" role="status">
+        {{ downloadStatus }}
+        <button type="button" @click="downloadController?.abort()">Cancel download</button>
+      </div>
+      <p v-else-if="downloadStatus" role="status">{{ downloadStatus }}</p>
       <input ref="fileInput" type="file" multiple hidden @change="onFilesSelected" />
     </div>
 
@@ -57,6 +63,7 @@ import MessageTable from '@/components/MessageTable.vue';
 import PopupToast from '@/components/PopupToast.vue';
 import QrModal from '@/components/QrModal.vue';
 import QRCode from 'qrcode';
+import { credentials, encryptFile, decryptFile, decryptMetadata, encryptChat, decryptChat } from '@/crypto.js';
 
 // ---------------------------------------------------------------------------
 // Utility helpers
@@ -94,26 +101,48 @@ async function copyToClipboard(text) {
 function createSocket(handlers) {
   const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
   const socket = new WebSocket(wsUrl);
+  let historyInFlight = false;
+  function pullHistory(offset) {
+    if (socket.readyState !== WebSocket.OPEN) return;
+    historyInFlight = true;
+    socket.send(JSON.stringify({ action: 'pull', offset }));
+  }
 
   socket.addEventListener('open', () => {
     console.log('WebSocket connected');
   });
 
-  socket.addEventListener('message', (event) => {
-    const payload = JSON.parse(event.data);
-    if (payload.action === 'connect') {
-      const info = payload.info ?? {};
-      info.identity = (localStorage.getItem('identity') || '').toUpperCase();
-      handlers.onConnect(info);
-      const offset = handlers.getOffset?.() ?? 0;
-      socket.send(
-        JSON.stringify({
-          action: 'pull',
-          offset
-        })
-      );
-    } else if (payload.action === 'send' && Array.isArray(payload.msgs)) {
-      handlers.onMessages(payload.msgs);
+  socket.addEventListener('message', async (event) => {
+    if (!handlers.isCurrent(socket) || socket.readyState !== WebSocket.OPEN) return;
+    try {
+      const payload = JSON.parse(event.data);
+      if (payload.action === 'connect') {
+        const info = payload.info ?? {};
+        info.identity = (localStorage.getItem('identity') || '').toUpperCase();
+        handlers.onConnect(info);
+        pullHistory(handlers.getOffset());
+      } else if (payload.action === 'send' && Array.isArray(payload.msgs)) {
+        await handlers.onMessages(payload.msgs);
+        if (!handlers.isCurrent(socket)) return;
+        if (Number.isSafeInteger(payload.next_offset)) {
+          if (payload.more) {
+            pullHistory(payload.next_offset);
+            return;
+          }
+          historyInFlight = false;
+          if (!payload.msgs.length && handlers.hasGap()) {
+            throw new Error('Incomplete message history; reload to retry');
+          }
+        }
+        if (!historyInFlight && handlers.hasGap()) pullHistory(handlers.getOffset());
+      } else if (payload.action === 'error') {
+        handlers.onServerError(payload.message);
+      } else {
+        throw new Error('Invalid server message');
+      }
+    } catch (error) {
+      console.error(error);
+      handlers.onServerError(`Unable to read messages: ${error.message}`);
     }
   });
 
@@ -125,12 +154,6 @@ function createSocket(handlers) {
   }
 
   return socket;
-}
-
-function sendMessage(socket, text) {
-  if (socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify({ action: 'send', data: text }));
-  }
 }
 
 async function logout() {
@@ -163,8 +186,16 @@ const fileInput = ref(null);
 
 const uploading = ref(false);
 const percentText = ref('');
-const currentXhr = ref(null);
-const uploadMetrics = reactive({ lastTime: 0, lastLoaded: 0, startTime: 0, total: 0 });
+let fileKey;
+let chatKey;
+let messageQueue = Promise.resolve();
+const pendingMessages = new Map();
+const sendingMessage = ref(false);
+const messageError = ref('');
+let uploadController;
+let downloadController;
+const downloading = ref(false);
+const downloadStatus = ref('');
 
 const toast = reactive({ visible: false, message: '' });
 const toastTimer = ref(null);
@@ -173,7 +204,8 @@ const qr = reactive({ open: false, image: null });
 // ---------------------------------------------------------------------------
 // Derived state and watchers
 // ---------------------------------------------------------------------------
-const canSend = computed(() => messageText.value.trim().length > 0 && socket.value?.readyState === WebSocket.OPEN);
+const canSend = computed(() => !sendingMessage.value && messageText.value.trim().length > 0 &&
+  !!chatKey && socket.value?.readyState === WebSocket.OPEN);
 
 watch(
   () => messages.value.length,
@@ -190,14 +222,23 @@ watch(
 // ---------------------------------------------------------------------------
 // Lifecycle hooks
 // ---------------------------------------------------------------------------
-onMounted(() => {
-  initSocket();
+onMounted(async () => {
+  try {
+    const keys = await credentials(localStorage.getItem('identity'));
+    fileKey = keys.key;
+    chatKey = keys.chatKey;
+    initSocket();
+  } catch (error) {
+    showToast(error.message);
+  }
 });
 
 onBeforeUnmount(() => {
   manualClose.value = true;
   clearReconnectTimer();
   socket.value?.close();
+  uploadController?.abort();
+  downloadController?.abort();
   if (toastTimer.value) {
     clearTimeout(toastTimer.value);
   }
@@ -215,16 +256,39 @@ function initSocket() {
   }
   manualClose.value = false;
   socket.value = createSocket({
+    isCurrent: (connection) => connection === socket.value,
     onConnect: (info) => {
       statusInfo.value = info;
       reconnectAttempts.value = 0;
     },
     onMessages: (msgs) => {
-      appendMessages(msgs);
+      messageQueue = messageQueue.then(() => appendMessages(msgs)).catch((error) => {
+        console.error(error);
+        pendingMessages.clear();
+        messageError.value = `Unable to read messages: ${error.message}`;
+        socket.value?.close();
+      });
+      return messageQueue;
     },
     getOffset: () => messages.value.length,
-    onClose: () => {
+    hasGap: () => pendingMessages.size > 0,
+    onServerError: (error) => {
+      messageError.value = error;
+      showToast(error);
+    },
+    onClose: async (event) => {
+      if (event.target !== socket.value) return;
       menuOpen.value = false;
+      if (event.code === 4000 && !manualClose.value) {
+        try {
+          const { auth } = await credentials(localStorage.getItem('identity'));
+          const response = await fetch('/login', { method: 'POST',
+            body: new URLSearchParams({ identity: auth }) });
+          if (response.ok) { scheduleReconnect(); return; }
+        } catch (error) { console.error(error); }
+        window.location.href = '/login.html';
+        return;
+      }
       scheduleReconnect();
     }
   });
@@ -249,8 +313,37 @@ function scheduleReconnect() {
   }, delay);
 }
 
-function appendMessages(newMessages) {
-  messages.value = [...messages.value, ...newMessages];
+async function appendMessages(newMessages) {
+  for (const message of newMessages) {
+    if (!Number.isSafeInteger(message.id) || message.id < 0) throw new Error('Invalid message history index');
+    if (message.id < messages.value.length || pendingMessages.has(message.id)) continue;
+    if (pendingMessages.size >= 256) throw new Error('Message history synchronization buffer exceeded');
+    pendingMessages.set(message.id, message);
+  }
+  while (pendingMessages.has(messages.value.length)) {
+    const message = pendingMessages.get(messages.value.length);
+    let decoded;
+    if (message.type === 1) {
+      try {
+        const meta = await decryptMetadata(message.data, fileKey);
+        decoded = { ...message, metadata: message.data, data: meta.name, size: formatSize(meta.size) };
+      } catch (error) {
+        console.error('File metadata authentication failed', error);
+        decoded = { ...message, data: 'File cannot be decrypted: invalid key or metadata', decryptError: true };
+      }
+    } else {
+      try {
+        if (message.type !== 0) throw new Error('Unsupported message type');
+        decoded = { ...message, data: await decryptChat(message.data, chatKey) };
+      } catch (error) {
+        console.error('Chat authentication failed', error);
+        decoded = { ...message, type: 0, data: 'Message cannot be decrypted: invalid key or encrypted data',
+          decryptError: true };
+      }
+    }
+    pendingMessages.delete(message.id);
+    messages.value.push(decoded);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -271,10 +364,26 @@ function showToast(msg) {
 // ---------------------------------------------------------------------------
 // Messaging
 // ---------------------------------------------------------------------------
-function sendCurrentMessage() {
+async function sendCurrentMessage() {
   if (!canSend.value || !socket.value) return;
-  sendMessage(socket.value, messageText.value.trim());
-  messageText.value = '';
+  const text = messageText.value;
+  const connection = socket.value;
+  sendingMessage.value = true;
+  messageError.value = '';
+  try {
+    const data = await encryptChat(text, chatKey);
+    if (connection !== socket.value || connection.readyState !== WebSocket.OPEN) {
+      throw new Error('Connection lost before sending. Your message has not been sent.');
+    }
+    if (connection.bufferedAmount > 96 * 1024) throw new Error('Connection is busy. Please try sending again.');
+    connection.send(JSON.stringify({ action: 'send', data }));
+    if (messageText.value === text) messageText.value = '';
+  } catch (error) {
+    console.error(error);
+    messageError.value = error.message;
+  } finally {
+    sendingMessage.value = false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -295,81 +404,97 @@ function onFilesSelected(event) {
   target.value = '';
 }
 
-function uploadFiles(files) {
-  if (uploading.value) {
-    return;
-  }
-  const list = Array.from(files);
-  if (list.length === 0) {
+function cancelUpload() {
+  uploadController?.abort();
+}
+
+async function checked(response) {
+  if (response.ok) return response;
+  if (response.status === 431) throw new Error('Storage space not enough');
+  throw new Error((await response.text()) || `Request failed (${response.status})`);
+}
+
+async function uploadFiles(files) {
+  if (uploading.value || !files.length) return;
+  if (!window.isSecureContext) {
+    percentText.value = 'Error: Encrypted uploads require HTTPS and HTTP/2 in desktop Chrome or Edge';
     return;
   }
   uploading.value = true;
-  percentText.value = '0%';
-  uploadMetrics.lastTime = performance.now();
-  uploadMetrics.lastLoaded = 0;
-  uploadMetrics.startTime = Date.now();
-  uploadMetrics.total = 0;
-
-  const formData = new FormData();
-  list.forEach((file) => formData.append('myfile[]', file, file.name));
-
-  const xhr = new XMLHttpRequest();
-  currentXhr.value = xhr;
-
-  xhr.upload.onprogress = (event) => {
-    if (event.lengthComputable) {
-      uploadMetrics.total = event.total;
-      const percent = Math.round((event.loaded / event.total) * 100);
-      const now = performance.now();
-      const deltaTime = now - uploadMetrics.lastTime;
-      if (deltaTime > 400) {
-        const deltaBytes = event.loaded - uploadMetrics.lastLoaded;
-        const speed = formatSize((deltaBytes / deltaTime) * 1000);
-        percentText.value = `${percent}% ${speed}/s`;
-        uploadMetrics.lastTime = now;
-        uploadMetrics.lastLoaded = event.loaded;
+  uploadController = new AbortController();
+  const { signal } = uploadController;
+  let count = 0;
+  try {
+    for (const file of Array.from(files)) {
+      signal.throwIfAborted();
+      let token;
+      let encrypted;
+      try {
+        encrypted = await encryptFile(file, fileKey, {
+          onProgress: (produced) => {
+            const percentage = file.size ? Math.floor(100 * produced / file.size) : 100;
+            percentText.value = `Encrypting ${count + 1}/${files.length}: ${percentage}% (not server-confirmed)`;
+          }
+        });
+        // Finish admission before streaming; the fetch upload response is half-duplex.
+        const admission = await checked(await fetch('/uploads', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ size: encrypted.size, metadata: encrypted.metadata }), signal
+        }));
+        ({ token } = await admission.json());
+        await checked(await fetch(`/uploads/${token}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' },
+          body: encrypted.body, duplex: 'half', signal
+        }));
+        token = null;
+        count += 1;
+      } finally {
+        encrypted?.dispose();
+        if (token) await checked(await fetch(`/uploads/${token}`, { method: 'DELETE' }));
       }
     }
-  };
-
-  xhr.onload = () => {
+    percentText.value = `Success: ${count} file(s) uploaded (server confirmed)`;
+    showToast('Upload complete');
+  } catch (error) {
+    console.error(error);
+    percentText.value = signal.aborted ? `Canceled (${count} completed)` :
+      `Error: ${error.message}. Streaming uploads require HTTPS/HTTP2 and desktop Chrome or Edge.`;
+  } finally {
     uploading.value = false;
-    
-    if (xhr.status === 200) {
-      // Calculate average speed over entire upload duration
-      const avgSpeed = uploadMetrics.total / (Date.now() - uploadMetrics.startTime); // KB/s
-      const avgSpeedFormatted = formatSize(avgSpeed * 1000); // Convert to B/s for formatSize
-      percentText.value = `Success: ${xhr.responseText} (${avgSpeedFormatted}/s)`;
-      showToast('Upload complete');
-    } else if (xhr.status === 431) {
-      percentText.value = 'Error: Storage space not enough';
-      showToast('Storage space not enough');
-    } else if (xhr.status === 413) {
-      percentText.value = 'Error: File too large';
-      showToast('File too large');
-    } else {
-      percentText.value = `Error: ${xhr.responseText || xhr.statusText}`;
-      showToast('Upload failed');
-    }
-    currentXhr.value = null;
-  };
-
-  xhr.onerror = () => {
-    uploading.value = false;
-    percentText.value = 'Error: Upload failed';
-    currentXhr.value = null;
-    showToast('Upload failed');
-  };
-
-  xhr.open('POST', '/files');
-  xhr.send(formData);
+    uploadController = null;
+  }
 }
 
-function cancelUpload() {
-  currentXhr.value?.abort();
-  uploading.value = false;
-  percentText.value = 'Canceled';
-  currentXhr.value = null;
+async function downloadEncryptedFile(message) {
+  if (downloading.value) return;
+  if (!window.showSaveFilePicker) {
+    downloadStatus.value = 'Saving encrypted files requires desktop Chrome or Edge over HTTPS. No in-memory fallback is used.';
+    return;
+  }
+  downloading.value = true;
+  downloadController = new AbortController();
+  const { signal } = downloadController;
+  let writable;
+  let handedOff = false;
+  try {
+    // Keep the picker in the click's user activation, before any async operation.
+    const handle = await window.showSaveFilePicker({ suggestedName: message.data });
+    signal.throwIfAborted();
+    writable = await handle.createWritable();
+    downloadStatus.value = 'Downloading and authenticating...';
+    const response = await checked(await fetch(`/files?id=${encodeURIComponent(message.file_id)}`, { signal }));
+    handedOff = true;
+    await decryptFile(response.body, message.metadata, fileKey, writable, { signal });
+    downloadStatus.value = 'Saved: authenticated download complete';
+  } catch (error) {
+    if (writable && !handedOff) await writable.abort();
+    console.error(error);
+    downloadStatus.value = signal.aborted || error.name === 'AbortError' ? 'Download canceled' :
+      `Download failed: ${error.message}. No unauthenticated file was committed.`;
+  } finally {
+    downloading.value = false;
+    downloadController = null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -404,7 +529,7 @@ async function handleShare() {
     showToast('Please login again.');
     return;
   }
-  const url = `${window.location.origin}/login.html?identity=${currentIdentity}`;
+  const url = `${window.location.origin}/login.html#identity=${encodeURIComponent(currentIdentity)}`;
   try {
     await copyToClipboard(url);
     showToast('Link copied!');

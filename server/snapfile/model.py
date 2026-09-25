@@ -1,11 +1,10 @@
 import os
-import sys
 import json
-import base64
 import hashlib
 import random
 import shutil
 import logging
+import re
 from enum import IntEnum
 from time import time
 from datetime import datetime, timezone, timedelta
@@ -16,15 +15,17 @@ from aiohttp import web
 from redis import asyncio as aioredis
 from concurrent.futures import ThreadPoolExecutor
 
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-
 from . import config
 
 log = logging.getLogger(__name__)
 redis = None
 thread_pools = ThreadPoolExecutor()
+FILE_FORMAT = 'SNAPFE02'
+HISTORY_PAGE_SIZE = 8
+
+
+class InvalidFolderData(ValueError):
+    pass
 
 
 def delete(path):
@@ -52,7 +53,13 @@ async def remove_expired_folders(app):
                 total += 1
                 f = app['folders'].get(identity, None)
                 if f is None:
-                    f = await Folder.open(identity)
+                    try:
+                        f = await Folder.open(identity)
+                    except InvalidFolderData:
+                        log.warning('Skipping unsupported or invalid folder %s; data left untouched', identity)
+                        continue
+                if f is None:
+                    continue
                 if not f.expired:
                     continue
                 deleted += 1
@@ -104,13 +111,14 @@ class Message(dict):
     __getattr__ = dict.__getitem__
     __setattr__ = dict.__setitem__
 
-    def __init__(self, type, data, size, sender, date=None, file_id=None):
+    def __init__(self, type, data, size, sender, date=None, file_id=None, id=None):
         self.type = type
         self.date = datetime.now(timezone.utc).isoformat() if date is None else date
         self.data = data
         self.size = size
         self.sender = sender
         self.file_id = file_id # exclusive to file
+        self.id = id
 
     def format_for_view(self):
         d = dict(self)
@@ -121,25 +129,24 @@ class Message(dict):
 class Folder:
     def __init__(self,
                  identity,
-                 encryption_key=None,
                  created_time=None,
                  age=None,
                  storage_limit=config.STORAGE_PER_FOLDER,
                  current_size=0,
-                 path=None,
-                 **kwargs):
+                 path=None):
         self.identity = identity
-        self.encryption_key = encryption_key
         self.created_time = datetime.now(timezone.utc).isoformat() if created_time is None else created_time
         self.age = config.AGE if age is None else age
         self.storage_limit = storage_limit
         self.current_size = current_size
         self.path = path
+        self.quota_lock = asyncio.Lock()
+        self.uploads = {}
+        self.reserved_size = 0
         if path is None:
             self.path = os.path.join(
                 str(random.randint(1, config.UPLOAD_SECOND_DIRECTORY_RANGE)),
                 self.identity)
-            shutil.rmtree(self.path, ignore_errors=True)
             os.makedirs(os.path.join(config.UPLOAD_ROOT_DIRECTORY, self.path))
         self.connections = set() # holds all active websocket connections
 
@@ -171,7 +178,10 @@ class Folder:
         """
         o = dict(self.__dict__)
         del o['connections']
-        del o['encryption_key']
+        del o['quota_lock']
+        del o['uploads']
+        del o['reserved_size']
+        o['file_format'] = FILE_FORMAT
         return json.dumps(o)
 
     def get_file_path(self, file_id=None):
@@ -189,12 +199,6 @@ class Folder:
         file_id = await redis.incr('#files:{}'.format(self.identity))
         return str(file_id)
 
-    def get_cipher(self, nonce=None):
-        if nonce is None:
-            nonce = os.urandom(16)
-        algorithm = algorithms.ChaCha20(self.encryption_key, nonce)
-        return Cipher(algorithm, mode=None), nonce
-
     def connect(self, ws):
         self.connections.add(ws)
 
@@ -207,29 +211,35 @@ class Folder:
             await ws.close(code=code, message=message)
 
     async def save(self, msg):
+        async with self.quota_lock:
+            if self.current_size + self.reserved_size + msg.size > self.storage_limit:
+                raise web.HTTPRequestHeaderFieldsTooLarge(text='Storage space not enough')
+            return await self._save(msg)
+
+    async def _save(self, msg):
         """Save the message in this folder
         """
-        if config.ENABLE_ENCRYPTION:
-            msg = Message(**msg)
-            cipher, nonce = self.get_cipher()
-            encryptor = cipher.encryptor()
-            data_b = nonce + encryptor.update(msg.data.encode('utf-8'))
-            msg.data = base64.b64encode(data_b).decode('ascii') # convert to str to fit in json. https://stackoverflow.com/a/40000564
         folder_key, msg_key = self._keys(self.identity)
         async with redis.pipeline(transaction=True) as tr:
             # enqueue: "If key does not exist, it is created as empty"
             tr.rpush(msg_key, json.dumps(msg))
             # update total used size
-            self.current_size += msg.size
-            tr.set(folder_key, self.serialize())
+            serialized = json.loads(self.serialize())
+            serialized['current_size'] += msg.size
+            tr.set(folder_key, json.dumps(serialized))
             ok1, ok2 = await tr.execute()
             if not (ok1 and ok2):
                 log.error('transaction failed')
-                return False
+                raise RuntimeError('Failed to persist message')
+            self.current_size += msg.size
+            msg.id = ok1 - 1
         return True
 
     async def send(self, msg):
         await self.save(msg)
+        await self.broadcast(msg)
+
+    async def broadcast(self, msg):
         for ws in list(self.connections):
             if ws.closed:
                 self.disconnect(ws)
@@ -248,33 +258,32 @@ class Folder:
 
                 # todo: How can we cancel the coroutine that listen to this ws?
                 # It does not work by simply calling ws.close()
-                ws.close()
+                await ws.close()
                 self.disconnect(ws)
                 log.warning('{} is lost due to {}'.format(ws['name'], ws.close_code))
             else:
-                await ws.send_json({
-                    'action': 'send',
-                    'msgs': [msg.format_for_view()]
-                })
+                try:
+                    await ws.send_json({
+                        'action': 'send',
+                        'msgs': [msg.format_for_view()]
+                    })
+                except ConnectionResetError:
+                    self.disconnect(ws)
+                    log.warning('Client disconnected while broadcasting persisted message')
 
     async def retrieve(self, offset):
-        if offset < 0:
+        if type(offset) is not int or not 0 <= offset <= 2**53 - 1:
             raise web.HTTPBadRequest
         _, msg_key = self._keys(self.identity)
         # suppose total is the length of the message queue
         # offset > total occurs when the folder (identified by the id) is renewed (still empty) in the server
         # but the client holds messages belonging to the old folder
         # this should be fine because lrange will return an empty list
-        msgs_json = await redis.lrange(msg_key, offset, -1)
+        msgs_json = await redis.lrange(msg_key, offset, offset + HISTORY_PAGE_SIZE - 1)
         results = []
-        for m in msgs_json:
+        for index, m in enumerate(msgs_json, start=offset):
             msg = Message(**json.loads(m))
-            if config.ENABLE_ENCRYPTION:
-                data_b = base64.b64decode(msg.data)
-                nonce = data_b[:16]
-                cipher, nonce = self.get_cipher(nonce)
-                decryptor = cipher.decryptor()
-                msg.data = decryptor.update(data_b[16:]).decode('utf-8')
+            msg.id = index
             # unfortunately, we could not use generator here: TypeError: object async_generator can't be used in 'await' expression
             results.append(msg)
         return results
@@ -283,42 +292,15 @@ class Folder:
     def _keys(identity):
         return 'folder:%s' % identity, 'messages:%s' % identity
 
-    @staticmethod
-    def _gen_hash(identity):
-        '''Given the passcode, generate a hash
-        For security, we don't store user's passcode in the server since passcode
-        is used to derive the key to encrypt messages and files.
-        The key derivation method (PBKDF2HMAC-SHA256) we are using only relies
-        on SHA256(passcode). Therefore, we must use a different cryptography
-        hash function here. We adopt SHA3-256 as it uses a completely different struction
-        from the SHA-256.
-        Also, we only pick 16 chars from the hexdigest of length 64. This makes it
-        even harder to exploit.
-        '''
-        return hashlib.sha3_256(identity.encode('utf-8')).hexdigest()[0:-1:4]
-
-    @staticmethod
-    def _gen_encryption_key(passcode):
-        """generate a 32-byte key used for symmethric encryption
-        """
-        salt = os.urandom(16)
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=480000,
-        )
-        return kdf.derive(passcode.encode('utf-8'))
-
     @classmethod
-    async def create(cls, passcode, age=None):
-        identity = cls._gen_hash(passcode)
+    async def create(cls, credential):
+        identity = cls.identity_for(credential)
         if await cls._exists(identity):
             # Anti brute force must be employed to disable this exploitation
             raise web.HTTPConflict(text='Identity conflicts, please try again!')
         if False:
             raise web.HTTPInsufficientStorage(text='Disk is full, please contact the admin! Thanks.')
-        folder = Folder(identity, age)
+        folder = Folder(identity)
         folder_key, msg_key = cls._keys(identity)
         # we might save a Folder object as a hashmap (i.e., a dict)
         # but all field values are strings
@@ -328,22 +310,43 @@ class Folder:
         return True
 
     @classmethod
-    async def login(cls, passcode):
-        identity = cls._gen_hash(passcode) # the raw passcode is never persisted
-        folder = await cls.open(identity)
-        if folder is not None:
-            folder.encryption_key = cls._gen_encryption_key(passcode)
-        return folder
+    async def login(cls, credential):
+        return await cls.open(cls.identity_for(credential))
+
+    @staticmethod
+    def identity_for(credential):
+        return hashlib.sha256(credential.encode('ascii')).hexdigest()
 
     @classmethod
     async def open(cls, identity):
         folder_key, _ = cls._keys(identity)
         folder_json = await redis.get(folder_key)
-        if folder_json:
-            folder_dict = json.loads(folder_json)
-            return Folder(**folder_dict)
-        else:
+        if folder_json is None:
             return None
+        try:
+            folder_dict = json.loads(folder_json)
+            fields = {'identity', 'created_time', 'age', 'storage_limit', 'current_size', 'path', 'file_format'}
+            if not isinstance(folder_dict, dict) or set(folder_dict) != fields:
+                raise ValueError('Invalid folder fields')
+            if folder_dict.pop('file_format') != FILE_FORMAT or folder_dict['identity'] != identity:
+                raise ValueError('Unsupported folder format')
+            if not re.fullmatch(r'[0-9a-f]{64}', identity):
+                raise ValueError('Invalid folder identity')
+            for field in ('age', 'storage_limit', 'current_size'):
+                if type(folder_dict[field]) is not int or folder_dict[field] < 0:
+                    raise ValueError('Invalid folder size or age')
+            if folder_dict['storage_limit'] == 0 or folder_dict['current_size'] > folder_dict['storage_limit']:
+                raise ValueError('Invalid folder quota')
+            created = datetime.fromisoformat(folder_dict['created_time'])
+            if created.tzinfo is None:
+                raise ValueError('Missing folder timezone')
+            if not isinstance(folder_dict['path'], str) or not re.fullmatch(r'[1-9][0-9]*/' + identity, folder_dict['path']):
+                raise ValueError('Invalid folder path')
+            folder = Folder(**folder_dict)
+            folder.expire_at  # Validate the persisted age before the reaper uses it.
+            return folder
+        except (ValueError, TypeError, OverflowError) as error:
+            raise InvalidFolderData('Unsupported or invalid folder data. Create a new folder.') from error
 
     @classmethod
     async def _exists(cls, identity):

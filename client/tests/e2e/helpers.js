@@ -42,6 +42,24 @@ export async function openFolder(page, passcode) {
   await waitForReady(page);
 }
 
+export async function installDiskPicker(page) {
+  await page.addInitScript(() => {
+    window.showSaveFilePicker = async ({ suggestedName }) => {
+      window.pickerHadActivation = navigator.userActivation.isActive;
+      const directory = await navigator.storage.getDirectory();
+      return directory.getFileHandle(suggestedName, { create: true });
+    };
+  });
+}
+
+export async function diskBytes(page, name) {
+  return page.evaluate(async (name) => {
+    const directory = await navigator.storage.getDirectory();
+    const handle = await directory.getFileHandle(name);
+    return Array.from(new Uint8Array(await (await handle.getFile()).arrayBuffer()));
+  }, name);
+}
+
 /** Type a message and send it via the Send button (waits for the socket to be ready). */
 export async function sendMessage(page, text) {
   await page.locator('#text').fill(text);

@@ -7,9 +7,66 @@ An anonymous file transfer application that enables you to access files from any
 * anonymous chat room
 * file transfer across any devices where a modern browswer is available
 * secure:
-    * all user data (messages and files) will be encrypted. Since passcode is never persisted in the server side, no one except the owner can decrypt the data
+    * E2E encryption. File contents, filenames and chat text are encrypted in
+      the browser; the server receives ciphertext and a separate authentication
+      token
     * expires automatically after one day
 
+
+## TODO
+
+* [ ] Address short-passcode offline guessing in a separate change: design
+  high-entropy, browser-generated encryption secrets shared through URL fragments,
+  with a copyable recovery code and clear key-retention/recovery behavior.
+  Clearly document any future key-format and access changes.
+  This sharing/access redesign is deferred from file and chat encryption;
+  encryption keys must still stay out of server requests.
+
+## Encrypted files and chat
+
+Folders retain the familiar six-character passcode. Their files and filename
+metadata use a versioned, authenticated streaming format. Uploading starts after
+a small quota-admission request, without collecting the complete plaintext or
+ciphertext in memory. Downloads decrypt to a File System Access writable and
+commit only after the final authentication record and end of stream are verified.
+There is **no whole-file Blob fallback**. Progress labels distinguish bytes
+encrypted from server-confirmed completion.
+
+Use **current desktop Chrome/Chromium or Edge, HTTPS, and browser-facing HTTP/2
+(or HTTP/3)**. Direct aiohttp HTTP/1 is not sufficient for streaming fetch uploads,
+even on localhost. Safari/mobile browser compatibility is not provided for this
+file path.
+
+Chat text is authenticated and encrypted in the browser with a separate
+domain-separated key and a fresh nonce per message. The server stores and relays
+only the opaque envelope. Messages may contain up to 65,536 UTF-8 bytes;
+ciphertext envelope bytes, not a client-supplied plaintext size, count against
+folder quota. Live messages and paged history are decrypted before display.
+Unreadable messages show an error row without hiding later messages.
+
+Share/QR links use `/login.html#identity=CODE`. The same short code
+is in a fragment so it is not sent in HTTP requests or access logs. Do not move it
+into a query string. Browser local storage retains the code, as before; logout
+clears it. This change adds no recovery-code or key-retention redesign.
+
+**Breaking change:** only browser-encrypted files and chat are supported. Pre-existing
+folder records/passcodes and `?identity=...` share links are not supported, and
+there is no migration or legacy login/upload/download mode. Create a new folder.
+Unsupported or malformed stored records are rejected with a visible error and
+left untouched by the expiry cleaner; this change does not delete old user data.
+The old multipart `POST /files` route is removed. Login accepts only the
+browser-derived authentication token, never a raw passcode or protocol selector.
+Plaintext chat clients are rejected. Earlier server-encrypted chat has no
+migration/decryption fallback and appears as unreadable messages; stored data
+is not rewritten or deleted by this change.
+
+The server still learns file/message lengths, timing, sender information and
+message order. Shared-key encryption does not authenticate individual senders or
+protect against a malicious server replaying messages under new history indices. Short codes
+can be guessed offline despite the client KDF; browser storage compromise or
+maliciously modified application JavaScript can also expose keys. See
+[the encryption protocols](docs/file-encryption.md) for framing, quota and format
+details.
 
 ## Install & Run
 
@@ -122,6 +179,33 @@ It supports websocket (long connection) which allows to implement the instant me
 3. prevent from brute force attack
 4. sharing port 443 with other services and forwarding to the backend (python web app in our case)
 
+Streaming uploads require HTTP/2 on the **browser-facing TLS listener**. The
+checked-in `deploy/snapfile.conf` uses `listen 443 ssl http2` (and the IPv6
+equivalent) for older CentOS nginx. For nginx **1.25.1 or newer**, prefer
+`listen 443 ssl;`, `listen [::]:443 ssl;`, and `http2 on;` in the server block.
+The build must include `http_v2_module`; check `nginx -V`, validate with `nginx -t`,
+and verify the browser's actual negotiated protocol after any deployment.
+
+Ciphertext downloads use NGINX `X-Accel-Redirect` by default with `ENV=PROD`;
+other environments default to aiohttp `FileResponse`. Set the backend environment
+variable `SNAPFILE_USE_X_ACCEL_REDIRECT=false` to opt out (required without NGINX),
+or `true` to enable explicitly. Accepted values are true/false, 1/0, yes/no and
+on/off (case-insensitive, surrounding whitespace ignored); invalid values stop
+startup. The backend always authorizes the folder and validates file IDs first.
+Enable only with the `internal` `/download/` location in `deploy/snapfile.conf`,
+whose `/var/www/snapfile/files/` alias must match the backend upload root.
+NGINX serves ciphertext, never plaintext: filenames remain encrypted metadata
+and are decrypted only in the browser, not restored in response headers or URLs.
+See [download offload](docs/file-encryption.md#optional-nginx-download-offload).
+
+Keep `proxy_http_version 1.1` and `proxy_request_buffering off` on `/uploads`
+and `/uploads/<token>`: that is the separate nginx-to-aiohttp connection.
+Do not introduce a proxy/CDN that buffers the full request. The app currently
+supports a **single backend process**, including its websocket cache and
+quota-reservation lock; do not scale it to independent workers without shared
+atomic admission/accounting and websocket coordination. Repository configuration
+changes do not update a running production server automatically.
+
 ### Redis
 keys:
 
@@ -148,6 +232,22 @@ npm run build
 # locally preview the production build
 npm run preview
 ```
+
+The default Vite/aiohttp HTTP/1 development path cannot exercise encrypted file
+uploads. To run the built app with an isolated local TLS/H2 proxy:
+
+```sh
+cd client
+SNAPFILE_E2E=1 npm run build
+node tests/e2e/server.mjs
+# Open https://127.0.0.1:8443/login.html in desktop Chromium.
+# The generated local certificate is self-signed; no system trust is changed.
+# Ctrl-C stops this launcher's Redis/backend and removes its temporary files.
+```
+
+This launcher uses private Redis/backend ports and a fresh `.cache/e2e-*`
+directory. It never uses the normal Redis instance or uploads. Set `E2E_PYTHON`
+if needed; a worktree `.venv/bin/python` is preferred when present.
 
 ### Supervisord
 manage the lifecycle of the service
@@ -176,13 +276,13 @@ need to install packages: websocket-client
 Functional test for APIs of python backend:
 using the classical python unittest
 ```sh
-cd tests
+cd server/tests
 python -m unittest -v test_api.py
 ```
 
-* use a separate port 8090
-* select db 0 of Redis
-* clean all data at startup
+* starts a loopback-only, non-persistent Redis on an available private port
+* starts backends on a private port with temporary uploads/logs
+* tears down only its own processes and test directory; no real Redis is flushed
 
 some known issues:
 
@@ -213,15 +313,17 @@ Functional test for NGINX config in a production environment.
 stress test for aiohttp.
 
 #### End-to-end tests (Playwright)
-Browser-level tests that drive the built Vue client against the real backend
-(HTTP + WebSocket + Redis), covering creating/opening a folder, sending
-messages, uploading and downloading files, real-time sync and sharing.
+Browser-level tests drive the built Vue client through real HTTPS/HTTP2 to the
+backend (plus WebSocket and isolated Redis). They cover file authentication,
+bounded buffering/backpressure, disk-backed downloads, cancellation/quota cleanup,
+rejection of unsupported old paths, messaging and sharing.
 
 ```sh
 cd client
 npm install
 npx playwright install chromium   # one-time browser download
 npm run test:e2e                  # builds the client, then runs the suite
+npm run test:crypto               # framing, key separation and stream unit tests
 ```
 
 Each run starts its own isolated, in-memory Redis and backend (`ENV=E2E`), so it

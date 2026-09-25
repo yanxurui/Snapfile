@@ -2,12 +2,9 @@ import os
 import sys
 import json
 import logging
-import mimetypes
-import struct
-
-from pprint import pprint
-from functools import wraps
-from datetime import datetime
+import re
+import base64
+import binascii
 
 import asyncio
 import aiohttp
@@ -18,9 +15,34 @@ from user_agents import parse
 
 from . import config
 from . import auth
-from .model import Message, MsgType, Folder
+from .model import Message, MsgType, Folder, HISTORY_PAGE_SIZE
 
 log = logging.getLogger(__name__)
+CHAT_PREFIX = 'SNAPCHAT01.'
+MAX_CHAT_BYTES = 64 * 1024
+MAX_CHAT_ENVELOPE = len(CHAT_PREFIX) + ((MAX_CHAT_BYTES + 40) * 4 + 2) // 3
+MAX_WS_MESSAGE = 96 * 1024
+
+
+def validate_chat_envelope(value):
+    if not isinstance(value, str) or len(value) > MAX_CHAT_ENVELOPE or not value.startswith(CHAT_PREFIX):
+        raise ValueError('An encrypted SNAPCHAT01 message is required (maximum 65536 UTF-8 bytes)')
+    encoded = value[len(CHAT_PREFIX):]
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', encoded):
+        raise ValueError('Invalid encrypted chat encoding')
+    try:
+        decoded = base64.b64decode(encoded + '=' * (-len(encoded) % 4), altchars=b'-_', validate=True)
+    except binascii.Error:
+        raise ValueError('Invalid encrypted chat encoding')
+    if not 41 <= len(decoded) <= MAX_CHAT_BYTES + 40 or base64.urlsafe_b64encode(decoded).decode().rstrip('=') != encoded:
+        raise ValueError('Invalid encrypted chat length or encoding')
+    return len(value)
+
+def credentials_from(form):
+    identity = form.get('identity', '')
+    if not isinstance(identity, str) or not re.fullmatch(r'[0-9a-f]{64}', identity):
+        raise web.HTTPBadRequest(text='Invalid authentication token')
+    return identity
 
 
 def get_client_display_name(request):
@@ -34,11 +56,8 @@ def get_client_display_name(request):
 
 async def signup(request):
     form_data = await request.post()
-    identity = form_data['identity']
-    if len(identity) > 32:
-        raise web.HTTPBadRequest()
-    age = form_data.get('age')
-    await Folder.create(identity, age)
+    identity = credentials_from(form_data)
+    await Folder.create(identity)
     identity = await auth.login(request.app['folders'], identity)
     resp = web.Response(status=201, text='Folder created!')
     await remember(request, resp, identity)
@@ -48,9 +67,7 @@ async def signup(request):
 async def login(request):
     assert request.method == 'POST'
     form_data = await request.post()
-    identity = form_data['identity']
-    if not identity:
-        raise web.HTTPBadRequest()
+    identity = credentials_from(form_data)
     # return 200 because ajax has trouble handling redirecting if 302 is returned
     resp = web.Response()
     # usually this should be user name & password
@@ -91,7 +108,7 @@ async def ws(request):
     # what if the websocket client does not support ping pong?
     # what if the client lost network and does not send back the 
     # pong? will an exception be thrown here? NO.
-    ws_current = web.WebSocketResponse(heartbeat=config.HEARTBEAT)
+    ws_current = web.WebSocketResponse(heartbeat=config.HEARTBEAT, max_msg_size=MAX_WS_MESSAGE)
     ws_ready = ws_current.can_prepare(request)
     if not ws_ready.ok:
         raise web.HTTPBadRequest()
@@ -123,24 +140,31 @@ async def ws(request):
                     log.info('expiration detected for websocket')
                     await ws_current.close(code=aiohttp.WSCloseCode.GOING_AWAY, message='Expired!')
                     break
-                ws_data = json.loads(ws_msg.data)
-                a = ws_data['action']
-                if a == 'send':
-                    msg = Message(
-                        type=MsgType.TEXT,
-                        data=ws_data['data'],
-                        size=len(ws_data['data']),
-                        sender=name
-                    )
-                    await folder.send(msg)
-                elif a == 'pull':
-                    msgs = await folder.retrieve(ws_data['offset'])
-                    await ws_current.send_json({
-                        'action': 'send',
-                        'msgs': [m.format_for_view() for m in msgs]
-                    })
-                else:
-                    log.warning('unknow action')
+                try:
+                    ws_data = json.loads(ws_msg.data)
+                    if not isinstance(ws_data, dict):
+                        raise ValueError('Invalid WebSocket request')
+                    a = ws_data.get('action')
+                    if a == 'send':
+                        size = validate_chat_envelope(ws_data.get('data'))
+                        msg = Message(type=MsgType.TEXT, data=ws_data['data'], size=size, sender=name)
+                        await folder.send(msg)
+                    elif a == 'pull':
+                        offset = ws_data.get('offset')
+                        msgs = await folder.retrieve(offset)
+                        await ws_current.send_json({
+                            'action': 'send',
+                            'msgs': [m.format_for_view() for m in msgs],
+                            'next_offset': offset + len(msgs),
+                            'more': len(msgs) == HISTORY_PAGE_SIZE
+                        })
+                    else:
+                        raise ValueError('Unknown WebSocket action')
+                except (ValueError, web.HTTPBadRequest) as error:
+                    log.warning('Rejected malformed WebSocket request')
+                    await ws_current.send_json({'action': 'error', 'message': str(error) or 'Invalid history offset'})
+                except web.HTTPRequestHeaderFieldsTooLarge:
+                    await ws_current.send_json({'action': 'error', 'message': 'Storage space not enough'})
             else:
                 log.warning('unknown message type {}'.format(str(ws_msg.type)))
                 # ws_msg.type == aiohttp.WSMsgType.CLOSING if closed by remove_expired_folders task
@@ -175,120 +199,22 @@ async def ws(request):
     return ws_current
 
 
-async def upload(request):
-    folder = await check_authorized(request)
-    name = get_client_display_name(request)
-    reader = await request.multipart()
-    count = 0
-    while True:
-        # reader.next() will `yield` the fields of your form
-        field = await reader.next()
-        if field is None:
-            break
-        if field.name != 'myfile[]':
-            raise web.HTTPBadRequest()
-        filename = field.filename
-        if filename is None:
-            # no file is selected
-            continue
-        if request.headers.get('Content-Length') is None or request.headers.get('Transfer-Encoding') is not None:
-            # We can safely assume Content-Length is always available since chunked transfer encoding is not suitable for uploading a file with fixed size
-            raise web.HTTPBadRequest()
-        l = int(request.headers['Content-Length'])
-        if l + folder.current_size > folder.storage_limit:
-            # it should be fine to check storage limit using Content-Length which represents the total size of the request
-            log.warning('Storage limit exceeds: {} > {}'.format(l+folder.current_size, folder.storage_limit))
-            raise web.HTTPRequestHeaderFieldsTooLarge()
-        log.info('start uploading %s' % filename)
-        file_id = await folder.gen_file_id()
-        file_path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, folder.get_file_path(file_id))
-        size = 0
-        try:
-            with open(file_path, 'wb') as f:
-                if config.ENABLE_ENCRYPTION:
-                    cipher, nonce = folder.get_cipher()
-                    encryptor = cipher.encryptor()
-                    f.write(nonce)
-                while True:
-                    chunk = await field.read_chunk(1024*1024)  # 8192 bytes by default.
-                    if not chunk:
-                        # todo: What else could cause this besides reaching the end of a file?
-                        break
-                    size += len(chunk)
-                    log.debug('writing {} for {} ...'.format(len(chunk), filename[:30]))
-                    if config.ENABLE_ENCRYPTION:
-                        chunk = encryptor.update(chunk)
-                    f.write(chunk) # block op
-                assert l >= size, 'Content-Length is usually larger than the file size'
-        except:
-            # if client abort uploading
-            # asyncio.exceptions.CancelledError will be captured here
-            os.remove(f.name)
-            log.warning('interrupt uploading {} due to {}'.format(filename, sys.exc_info()[0]))
-            raise
-        log.info('finish uploading {}'.format(filename))
-        count += 1
-        msg = Message(
-            type=MsgType.FILE,
-            data=filename,
-            size=size,
-            sender=name,
-            file_id=file_id,
-        )
-        await folder.send(msg)
-    return web.Response(text='{} file(s) uploaded'.format(count))
-
-
 async def download(request):
     folder = await check_authorized(request)
-    file_id = request.query['id']
-    file_name = request.query['name'] # we can not query the filename by file id in server side
-    file_path = folder.get_file_path(file_id)
-    if not config.ENABLE_ENCRYPTION:
-        resp = web.Response(headers={
-            'Content-Disposition': 'attachment; filename="{0}"'.format(file_name),
-            'X-Accel-Redirect': '/download/{}'.format(file_path)
-            })
-        log.info('redirect to NGINX')
-        return resp
-    else:
-        ct, encoding = mimetypes.guess_type(file_name)
-        if not ct:
-            ct = "application/octet-stream"
-        resp = web.StreamResponse(
-            headers={
-                'Content-Type': ct,
-                'Content-Disposition': 'attachment; filename="{0}"'.format(file_name),
-            },
-        )
-        chunk_size = 1024*1024
-        file_path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, file_path)
-        # Without setting Content-Length, chunked transfer encoding will be used.
-        # The downside is that the client has no way to estimate the ETA
-        # So, let's infer the Content-Length from the file size
-        try:
-            file_size = os.path.getsize(file_path) - 16
-        except FileNotFoundError:
-            # this is probably a bad request with an arbitrary file id
-            raise web.HTTPNotFound()
-        resp.content_length = file_size
-        await resp.prepare(request)
-        log.info('start downloading file: %s', file_name)
-        with open(file_path, 'rb') as file:
-            if config.ENABLE_ENCRYPTION:
-                nonce = file.read(16)
-                cipher, _ = folder.get_cipher(nonce)
-                decryptor = cipher.decryptor()
-            while True:
-                chunk = file.read(chunk_size)
-                if not chunk:
-                    break
-                log.debug('send %d bytes for %s', len(chunk), file_name)
-                if config.ENABLE_ENCRYPTION:
-                    chunk = decryptor.update(chunk)
-                await resp.write(chunk)
-        await resp.write_eof()
-        log.info('finish downloading file %s', file_name)
-        return resp
-
-
+    file_id = request.query.get('id', '')
+    if not re.fullmatch(r'[0-9]+', file_id) or 'name' in request.query:
+        raise web.HTTPBadRequest(text='Invalid file id')
+    relative_path = folder.get_file_path(file_id)
+    path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, relative_path)
+    if not os.path.isfile(path):
+        raise web.HTTPNotFound()
+    headers = {
+        'Content-Type': 'application/octet-stream',
+        'Cache-Control': 'no-store',
+        'Content-Disposition': 'attachment'
+    }
+    if config.USE_X_ACCEL_REDIRECT:
+        # Folder paths contain only validated ASCII digits, hex and slashes.
+        headers['X-Accel-Redirect'] = '/download/' + relative_path
+        return web.Response(headers=headers)
+    return web.FileResponse(path, headers=headers)

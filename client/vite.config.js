@@ -19,6 +19,7 @@ export default defineConfig({
       '/login': 'http://localhost:8080',
       '/logout': 'http://localhost:8080',
       '/files': 'http://localhost:8080',
+      '/uploads': 'http://localhost:8080',
       '/auth': 'http://localhost:8080',
       '/ws': {
         target: 'ws://localhost:8080',
@@ -32,7 +33,9 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: path.resolve(rootDir, 'index.html'),
-        login: path.resolve(rootDir, 'login.html')
+        login: path.resolve(rootDir, 'login.html'),
+        ...(process.env.SNAPFILE_E2E === '1' ?
+          { streams: path.resolve(rootDir, 'tests/e2e/stream.html') } : {})
       }
     }
   }

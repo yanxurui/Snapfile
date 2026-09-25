@@ -12,7 +12,6 @@ STORAGE_PER_FOLDER = 10**9 # bytes, 1 GB by default
 UPLOAD_ROOT_DIRECTORY = './upload'
 # a Folder will be placed in a random second level directory named from 1 to 1024 under UPLOAD_ROOT_DIRECTORY
 UPLOAD_SECOND_DIRECTORY_RANGE = 2**10
-ENABLE_ENCRYPTION = True
 DELETE_INTERVAL = 24*60*60 # seconds i.e., daily
 HEARTBEAT = 30 # seconds
 RECEIVE_TIMEOUT = 3600 # 1 hour
@@ -31,6 +30,10 @@ elif ENV == 'TEST':
     LOG_FILE = 'test.log'
     STORAGE_PER_FOLDER = 10**6 # 1 MB
     DELETE_INTERVAL = 6
+    REDIS_ADDRESS = os.environ.get('REDIS_ADDRESS', 'redis://127.0.0.1:6391')
+    PORT = int(os.environ.get('SNAPFILE_PORT', 8090))
+    LOG_FILE = os.environ.get('SNAPFILE_LOG', 'test.log')
+    UPLOAD_ROOT_DIRECTORY = os.environ.get('SNAPFILE_UPLOAD', './upload_test')
 elif ENV == 'E2E':
     # Dedicated configuration for the Playwright end-to-end suite.
     # The e2e launcher (client/tests/e2e/server.mjs) starts an isolated, in-memory
@@ -51,6 +54,14 @@ elif ENV == 'E2E':
     # let the background reaper delete anything mid-test.
     AGE = 24*60*60
     DELETE_INTERVAL = 24*60*60
-    STORAGE_PER_FOLDER = 10**7 # 10 MB, plenty for the e2e file fixtures
+    STORAGE_PER_FOLDER = int(os.environ.get('SNAPFILE_QUOTA', 10**7))
 else: # DEV
     DELETE_INTERVAL = 60
+
+USE_X_ACCEL_REDIRECT = PROD
+_x_accel_override = os.environ.get('SNAPFILE_USE_X_ACCEL_REDIRECT')
+if _x_accel_override is not None:
+    _x_accel_override = _x_accel_override.strip().lower()
+    if _x_accel_override not in ('true', 'false', '1', '0', 'yes', 'no', 'on', 'off'):
+        raise ValueError('SNAPFILE_USE_X_ACCEL_REDIRECT must be true/false, 1/0, yes/no or on/off')
+    USE_X_ACCEL_REDIRECT = _x_accel_override in ('true', '1', 'yes', 'on')
