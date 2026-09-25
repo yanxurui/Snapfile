@@ -20,8 +20,7 @@ from . import config
 log = logging.getLogger(__name__)
 redis = None
 thread_pools = ThreadPoolExecutor()
-FILE_FORMAT = 'SNAPFE02'
-HISTORY_PAGE_SIZE = 8
+FILE_FORMAT = 'SNAPFE02' # Snapfile File Encryption format 02 (secretstream).
 
 
 class InvalidFolderData(ValueError):
@@ -93,7 +92,7 @@ async def startup(app):
         await redis.flushdb()
         delete(config.UPLOAD_ROOT_DIRECTORY)
     # makedirs (not mkdir) so an isolated, possibly nested upload root (e.g. the
-    # e2e SNAPFILE_UPLOAD) can be created even if its parent doesn't exist yet.
+    # isolated test uploads) can be created even if its parent doesn't exist yet.
     os.makedirs(config.UPLOAD_ROOT_DIRECTORY, exist_ok=True)
     # add some quick or long running tasks
     asyncio.create_task(remove_expired_folders(app))
@@ -117,8 +116,8 @@ class Message(dict):
         self.data = data
         self.size = size
         self.sender = sender
-        self.file_id = file_id # exclusive to file
-        self.id = id
+        self.file_id = file_id # Numbered ciphertext file on disk; file messages only.
+        self.id = id # Zero-based history position across both chat and file messages.
 
     def format_for_view(self):
         d = dict(self)
@@ -227,12 +226,13 @@ class Folder:
             serialized = json.loads(self.serialize())
             serialized['current_size'] += msg.size
             tr.set(folder_key, json.dumps(serialized))
-            ok1, ok2 = await tr.execute()
-            if not (ok1 and ok2):
+            message_count, folder_saved = await tr.execute()
+            if not (message_count and folder_saved):
                 log.error('transaction failed')
                 raise RuntimeError('Failed to persist message')
+            # Failed persistence must not charge the in-memory quota.
             self.current_size += msg.size
-            msg.id = ok1 - 1
+            msg.id = message_count - 1
         return True
 
     async def send(self, msg):
@@ -273,13 +273,13 @@ class Folder:
 
     async def retrieve(self, offset):
         if type(offset) is not int or not 0 <= offset <= 2**53 - 1:
-            raise web.HTTPBadRequest
+            raise web.HTTPBadRequest(text='History offset must be a nonnegative safe integer')
         _, msg_key = self._keys(self.identity)
         # suppose total is the length of the message queue
         # offset > total occurs when the folder (identified by the id) is renewed (still empty) in the server
         # but the client holds messages belonging to the old folder
         # this should be fine because lrange will return an empty list
-        msgs_json = await redis.lrange(msg_key, offset, offset + HISTORY_PAGE_SIZE - 1)
+        msgs_json = await redis.lrange(msg_key, offset, offset + config.HISTORY_PAGE_SIZE - 1)
         results = []
         for index, m in enumerate(msgs_json, start=offset):
             msg = Message(**json.loads(m))
@@ -335,7 +335,7 @@ class Folder:
             for field in ('age', 'storage_limit', 'current_size'):
                 if type(folder_dict[field]) is not int or folder_dict[field] < 0:
                     raise ValueError('Invalid folder size or age')
-            if folder_dict['storage_limit'] == 0 or folder_dict['current_size'] > folder_dict['storage_limit']:
+            if folder_dict['storage_limit'] == 0:
                 raise ValueError('Invalid folder quota')
             created = datetime.fromisoformat(folder_dict['created_time'])
             if created.tzinfo is None:

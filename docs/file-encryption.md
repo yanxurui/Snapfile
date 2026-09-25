@@ -12,6 +12,8 @@ schema validation. Unsupported/versionless/malformed records produce a visible
 login error and are skipped by the expiry cleaner with a warning, without
 rewriting or deleting their records or files. This storage marker and the
 authenticated ciphertext version identify formats, not selectable app protocols.
+`SNAPFE02` means Snapfile File Encryption format 02: the current secretstream
+layout. It is not an encryption on/off switch or a legacy compatibility mode.
 
 The browser normalizes the existing short passcode to lowercase and derives a
 32-byte master using PBKDF2-HMAC-SHA256, 310,000 iterations, salt
@@ -49,7 +51,8 @@ for the actual envelope length, ignoring client-supplied sizes, under the same
 lock as file reservations. Redis persists the envelope unchanged; no server
 chat cipher, derived chat key or server-side encryption layer remains.
 
-History responses contain at most eight messages and include `next_offset`
+History responses contain at most `config.HISTORY_PAGE_SIZE` messages (64 by
+default) and include `next_offset`
 and `more`. Each message's authoritative zero-based `id` is its Redis list
 position; live broadcasts use the position returned by RPUSH. The browser
 serializes decryption, displays contiguous positions, and deduplicates overlap
@@ -136,17 +139,20 @@ behavior; they do not assert a bound on whole-browser RSS.
 
 ## Server storage and quota
 
-`POST /uploads` admits `{size, metadata}` for an authenticated folder, reserving exact
+`POST /files` admits `{size, metadata}` for an authenticated folder, reserving exact
 ciphertext bytes plus the encrypted metadata string length. It returns an
-unpredictable token. `PUT /uploads/<token>` consumes that admission once and
+unpredictable token. `PUT /files/<token>` consumes that admission once and
 streams `application/octet-stream` into a numbered `.part` file with 64 KiB
 reads. Requests do not need Content-Length. Actual received bytes must equal
 the admitted count; both overflow and short bodies fail.
 
 A successful upload renames the file and persists its opaque metadata message
 before broadcasting it. `GET /files?id=<number>` returns the stored ciphertext
-unchanged, without a filename query. The old multipart `POST /files` route and
-server-side file decryption are removed. The server cannot authenticate ciphertext; the receiving browser
+unchanged, without needing a filename query. An extra `name` query is ignored,
+never used for paths or response headers; the browser never sends filenames.
+The common `/files` namespace handles downloads, JSON admission, streaming PUT
+and cancellation. Old multipart payloads and server-side file decryption are
+not supported. The server cannot authenticate ciphertext; the receiving browser
 does that.
 
 An in-process per-folder lock covers quota reservations, chat charges and file
@@ -154,21 +160,24 @@ commits. Concurrent admissions cannot spend the same space. At most eight
 admissions per folder may be pending/active; unused admissions expire after
 60 seconds and are reclaimed on subsequent admission. Active reads time out
 after 30 seconds without input. Cancellation, bad sizes and failed requests
-delete partial files and release reservations. `DELETE /uploads/<token>` cancels
+delete partial files and release reservations. `DELETE /files/<token>` cancels
 an active upload or releases its unused admission; final commit is not interrupted
 once begun. A disconnected client that never received its admission token can
 leave its reservation until the admission expires.
+These limits live in `config.py`: `MAX_PENDING_UPLOADS`,
+`UPLOAD_ADMISSION_TIMEOUT`, `UPLOAD_READ_TIMEOUT` and `MAX_FILE_METADATA`
+(24,000 bytes). A folder already over quota can still be opened and downloaded;
+new chat messages and file admissions remain blocked until there is space.
 
 The existing deployment model is one backend process with one folder/websocket
 cache. Multiple independent workers are not supported by this accounting model.
 
 ## Optional NGINX download offload
 
-`USE_X_ACCEL_REDIRECT` defaults to true with `ENV=PROD` and false otherwise.
-Set the backend environment variable `SNAPFILE_USE_X_ACCEL_REDIRECT=false` to
-disable it (required without NGINX), or `true` to enable it explicitly.
-The override accepts true/false, 1/0, yes/no and on/off, case-insensitively with
-surrounding whitespace ignored; other values fail startup.
+`USE_X_ACCEL_REDIRECT = False` is the default in `server/snapfile/config.py`;
+the PROD section overrides it with `True`. Change that section to `False` when
+running production without NGINX. There is no environment-variable flag parser;
+only `ENV` selects a config section.
 
 Both modes authorize the folder, validate the numeric file ID and check the
 file exists before responding. Enabled mode returns `X-Accel-Redirect` with

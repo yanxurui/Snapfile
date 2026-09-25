@@ -10,11 +10,6 @@ from . import config
 from .model import Message, MsgType
 from .views import get_client_display_name
 
-ADMISSION_TIMEOUT = 60
-READ_TIMEOUT = 30
-MAX_PENDING = 8
-MAX_METADATA = 24000
-
 
 def release(folder, token):
     upload = folder.uploads.pop(token, None)
@@ -33,7 +28,7 @@ async def admit(request):
     size = data.get('size')
     metadata = data.get('metadata')
     if (type(size) is not int or size < 53 or
-            not isinstance(metadata, str) or not 1 <= len(metadata) <= MAX_METADATA or
+            not isinstance(metadata, str) or not 1 <= len(metadata) <= config.MAX_FILE_METADATA or
             not metadata.isascii()):
         raise web.HTTPBadRequest(text='Invalid encrypted file size or metadata')
     charge = size + len(metadata)
@@ -41,7 +36,7 @@ async def admit(request):
         for token, upload in list(folder.uploads.items()):
             if upload['task'] is None and upload['expires'] < monotonic():
                 release(folder, token)
-        if len(folder.uploads) >= MAX_PENDING:
+        if len(folder.uploads) >= config.MAX_PENDING_UPLOADS:
             raise web.HTTPTooManyRequests(text='Too many pending uploads')
         if folder.current_size + folder.reserved_size + charge > folder.storage_limit:
             raise web.HTTPRequestHeaderFieldsTooLarge(text='Storage space not enough')
@@ -49,7 +44,7 @@ async def admit(request):
         file_id = await folder.gen_file_id()
         folder.uploads[token] = {
             'size': size, 'metadata': metadata, 'charge': charge, 'id': file_id,
-            'expires': monotonic() + ADMISSION_TIMEOUT, 'task': None,
+            'expires': monotonic() + config.UPLOAD_ADMISSION_TIMEOUT, 'task': None,
             'committing': False, 'cancelling': False,
         }
         folder.reserved_size += charge
@@ -94,7 +89,7 @@ async def upload(request):
         with open(partial, 'xb') as output:
             while True:
                 try:
-                    chunk = await asyncio.wait_for(request.content.read(64 * 1024), READ_TIMEOUT)
+                    chunk = await asyncio.wait_for(request.content.read(64 * 1024), config.UPLOAD_READ_TIMEOUT)
                 except asyncio.TimeoutError:
                     raise web.HTTPRequestTimeout(text='Upload stalled')
                 if not chunk:

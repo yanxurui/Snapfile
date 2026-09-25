@@ -15,7 +15,7 @@ from user_agents import parse
 
 from . import config
 from . import auth
-from .model import Message, MsgType, Folder, HISTORY_PAGE_SIZE
+from .model import Message, MsgType, Folder
 
 log = logging.getLogger(__name__)
 CHAT_PREFIX = 'SNAPCHAT01.'
@@ -156,13 +156,16 @@ async def ws(request):
                             'action': 'send',
                             'msgs': [m.format_for_view() for m in msgs],
                             'next_offset': offset + len(msgs),
-                            'more': len(msgs) == HISTORY_PAGE_SIZE
+                            'more': len(msgs) == config.HISTORY_PAGE_SIZE
                         })
                     else:
                         raise ValueError('Unknown WebSocket action')
-                except (ValueError, web.HTTPBadRequest) as error:
+                except web.HTTPBadRequest as error:
                     log.warning('Rejected malformed WebSocket request')
-                    await ws_current.send_json({'action': 'error', 'message': str(error) or 'Invalid history offset'})
+                    await ws_current.send_json({'action': 'error', 'message': error.text})
+                except ValueError as error:
+                    log.warning('Rejected malformed WebSocket request')
+                    await ws_current.send_json({'action': 'error', 'message': str(error)})
                 except web.HTTPRequestHeaderFieldsTooLarge:
                     await ws_current.send_json({'action': 'error', 'message': 'Storage space not enough'})
             else:
@@ -202,7 +205,7 @@ async def ws(request):
 async def download(request):
     folder = await check_authorized(request)
     file_id = request.query.get('id', '')
-    if not re.fullmatch(r'[0-9]+', file_id) or 'name' in request.query:
+    if not re.fullmatch(r'[0-9]+', file_id):
         raise web.HTTPBadRequest(text='Invalid file id')
     relative_path = folder.get_file_path(file_id)
     path = os.path.join(config.UPLOAD_ROOT_DIRECTORY, relative_path)

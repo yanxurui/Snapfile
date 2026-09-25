@@ -19,7 +19,6 @@ export default defineConfig({
       '/login': 'http://localhost:8080',
       '/logout': 'http://localhost:8080',
       '/files': 'http://localhost:8080',
-      '/uploads': 'http://localhost:8080',
       '/auth': 'http://localhost:8080',
       '/ws': {
         target: 'ws://localhost:8080',

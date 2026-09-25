@@ -54,7 +54,7 @@ folder records/passcodes and `?identity=...` share links are not supported, and
 there is no migration or legacy login/upload/download mode. Create a new folder.
 Unsupported or malformed stored records are rejected with a visible error and
 left untouched by the expiry cleaner; this change does not delete old user data.
-The old multipart `POST /files` route is removed. Login accepts only the
+`POST /files` now accepts JSON upload admission, not multipart plaintext. Login accepts only the
 browser-derived authentication token, never a raw passcode or protocol selector.
 Plaintext chat clients are rejected. Earlier server-encrypted chat has no
 migration/decryption fallback and appears as unreadable messages; stored data
@@ -187,19 +187,20 @@ The build must include `http_v2_module`; check `nginx -V`, validate with `nginx 
 and verify the browser's actual negotiated protocol after any deployment.
 
 Ciphertext downloads use NGINX `X-Accel-Redirect` by default with `ENV=PROD`;
-other environments default to aiohttp `FileResponse`. Set the backend environment
-variable `SNAPFILE_USE_X_ACCEL_REDIRECT=false` to opt out (required without NGINX),
-or `true` to enable explicitly. Accepted values are true/false, 1/0, yes/no and
-on/off (case-insensitive, surrounding whitespace ignored); invalid values stop
-startup. The backend always authorizes the folder and validates file IDs first.
+other environments default to aiohttp `FileResponse`. `USE_X_ACCEL_REDIRECT` is
+`False` in the defaults and `True` in the PROD section of `server/snapfile/config.py`.
+Set it to `False` in that section when running without NGINX. Settings are
+configured in this file; only `ENV` selects the environment section.
+`HOST = None` preserves binding to all interfaces in DEV/PROD; TEST/E2E bind
+to `127.0.0.1`. The backend always authorizes the folder and validates file IDs first.
 Enable only with the `internal` `/download/` location in `deploy/snapfile.conf`,
 whose `/var/www/snapfile/files/` alias must match the backend upload root.
 NGINX serves ciphertext, never plaintext: filenames remain encrypted metadata
 and are decrypted only in the browser, not restored in response headers or URLs.
 See [download offload](docs/file-encryption.md#optional-nginx-download-offload).
 
-Keep `proxy_http_version 1.1` and `proxy_request_buffering off` on `/uploads`
-and `/uploads/<token>`: that is the separate nginx-to-aiohttp connection.
+Keep `proxy_http_version 1.1` and `proxy_request_buffering off` on `/files`
+and `/files/<token>`: that is the separate nginx-to-aiohttp connection.
 Do not introduce a proxy/CDN that buffers the full request. The app currently
 supports a **single backend process**, including its websocket cache and
 quota-reservation lock; do not scale it to independent workers without shared
@@ -248,6 +249,9 @@ node tests/e2e/server.mjs
 This launcher uses private Redis/backend ports and a fresh `.cache/e2e-*`
 directory. It never uses the normal Redis instance or uploads. Set `E2E_PYTHON`
 if needed; a worktree `.venv/bin/python` is preferred when present.
+The test-only `server/tests/run_server.py` accepts private ports and a temporary
+directory from the launchers without adding environment overrides to application
+config. E2E quota is fixed at 96 MiB in the E2E config section.
 
 ### Supervisord
 manage the lifecycle of the service

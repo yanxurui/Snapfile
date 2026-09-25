@@ -134,7 +134,7 @@ test.describe('messaging', () => {
       });
     });
     await createFolder(page);
-    const texts = Array.from({ length: 25 }, (_, i) => `ordered-${i.toString().padStart(2, '0')} \u00e9\nline`);
+    const texts = Array.from({ length: 129 }, (_, i) => `ordered-${i.toString().padStart(3, '0')} \u00e9\nline`);
     for (const text of texts) await sendMessage(page, text);
     await expect(page.locator('#middle tr')).toHaveCount(texts.length);
     expect(await page.locator('#middle tr td:first-child').allTextContents()).toEqual(texts);
@@ -151,7 +151,7 @@ test.describe('messaging', () => {
     await page.reload();
     await expect(page.locator('#middle tr')).toHaveCount(texts.length + 1);
     expect(await page.locator('#middle tr td:first-child').allTextContents()).toEqual([...texts, 'after reconnect']);
-    expect(pulls.slice(beforeReload)).toEqual([0, 8, 16, 24]);
+    expect(pulls.slice(beforeReload)).toEqual([0, 64, 128]);
   });
 
   test('live messages arriving before the first history page are ordered and deduplicated', async ({ page, browser }) => {
@@ -257,7 +257,7 @@ test.describe('messaging', () => {
     await expect(page.locator('#text')).toHaveValue(tooLarge);
     await expect(page.locator('#middle tr')).toHaveCount(0);
     const token = await page.evaluate(async () => {
-      const response = await fetch('/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const response = await fetch('/files', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ size: 96 * 1024 * 1024 - 30, metadata: 'opaque' }) });
       if (!response.ok) throw new Error(await response.text());
       return (await response.json()).token;
@@ -265,7 +265,7 @@ test.describe('messaging', () => {
     await sendMessage(page, 'quota test');
     await expect(page.getByRole('alert')).toHaveText('Storage space not enough');
     await expect(page.locator('#middle tr')).toHaveCount(0);
-    await page.evaluate(token => fetch(`/uploads/${token}`, { method: 'DELETE' }), token);
+    await page.evaluate(token => fetch(`/files/${token}`, { method: 'DELETE' }), token);
     await sendMessage(page, 'works after releasing quota');
     await expect(messageRow(page, 'works after releasing quota')).toBeVisible();
   });

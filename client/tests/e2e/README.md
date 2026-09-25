@@ -56,8 +56,10 @@ A run is **fully isolated** and touches none of your dev/prod data:
 `SNAPFILE_E2E=1` adds an extra built test-harness page that imports the same
 streaming crypto module for instrumentation. Ordinary production builds do not
 include that page. Test-only throttling lives in the local proxy, not the backend.
-The launcher explicitly sets `SNAPFILE_USE_X_ACCEL_REDIRECT=false`: the Node
-proxy does not implement NGINX internal redirects. These browser tests exercise
+The E2E config hardcodes the 96 MiB quota and leaves `USE_X_ACCEL_REDIRECT=False`:
+the Node proxy does not implement NGINX internal redirects. Private ports and
+temporary paths are passed as arguments to `server/tests/run_server.py`, which
+overrides those settings only inside its test process. These browser tests exercise
 the aiohttp ciphertext-download fallback, not native NGINX offload. The backend
 suite checks both flag settings and runs an isolated NGINX round trip when the
 `nginx` executable is available (otherwise that integration test is skipped).

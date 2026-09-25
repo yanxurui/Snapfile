@@ -149,23 +149,14 @@ try {
 }
 
 // 2. snapfile backend --------------------------------------------------------
-const server = spawn(PYTHON, ['-m', 'snapfile'], {
+const server = spawn(PYTHON, [resolve(repoRoot, 'server/tests/run_server.py'),
+  '--environment', 'E2E', '--port', SNAPFILE_PORT, '--redis-port', REDIS_PORT,
+  '--directory', runDirectory], {
   cwd: resolve(repoRoot, 'server'),
-  env: {
-    ...process.env,
-    ENV: 'E2E',
-    SNAPFILE_PORT,
-    REDIS_ADDRESS: `redis://127.0.0.1:${REDIS_PORT}`,
-    SNAPFILE_UPLOAD: resolve(runDirectory, 'uploads'),
-    SNAPFILE_LOG: resolve(runDirectory, 'backend.log'),
-    SNAPFILE_QUOTA: String(96 * 1024 * 1024),
-    // This Node proxy does not implement NGINX internal redirects.
-    SNAPFILE_USE_X_ACCEL_REDIRECT: 'false',
-  },
   stdio: ['ignore', 'inherit', 'inherit'],
 });
 children.push(server);
-server.on('error', (err) => fail(`failed to start snapfile (${PYTHON} -m snapfile): ${err.message}`));
+server.on('error', (err) => fail(`failed to start snapfile test backend (${PYTHON}): ${err.message}`));
 server.on('exit', (code, signal) => {
   if (!shuttingDown) fail(`snapfile exited (code=${code}, signal=${signal})`);
 });

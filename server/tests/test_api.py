@@ -13,7 +13,7 @@ import base64
 import re
 import runpy
 import shutil
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from time import sleep
@@ -28,6 +28,9 @@ LOG = None
 test_directory = None
 redis_process = None
 backend_environment = None
+backend_arguments = None
+upload_directory = None
+test_redis_address = None
 
 
 def chat_envelope(text):
@@ -43,7 +46,8 @@ def free_port():
 
 
 def setUpModule():
-    global HOST, LOG, test_directory, redis_process, backend_environment
+    global HOST, LOG, test_directory, redis_process, backend_environment, backend_arguments, upload_directory
+    global test_redis_address
     test_directory = tempfile.TemporaryDirectory(prefix='snapfile-api-', dir=os.path.dirname(__file__))
     redis_port = free_port()
     port = free_port()
@@ -61,12 +65,14 @@ def setUpModule():
             sleep(0.05)
     else:
         raise RuntimeError('Isolated test Redis failed to start')
-    backend_environment = {
-        **os.environ, 'ENV': 'TEST', 'REDIS_ADDRESS': 'redis://127.0.0.1:{}'.format(redis_port),
-        'SNAPFILE_PORT': str(port), 'SNAPFILE_LOG': LOG,
-        'SNAPFILE_UPLOAD': os.path.join(test_directory.name, 'uploads'),
-        'SNAPFILE_USE_X_ACCEL_REDIRECT': 'false'
-    }
+    backend_environment = {**os.environ, 'ENV': 'TEST'}
+    upload_directory = os.path.join(test_directory.name, 'uploads')
+    backend_arguments = [
+        str(Path(__file__).resolve().with_name('run_server.py')),
+        '--environment', 'TEST', '--port', str(port), '--redis-port', str(redis_port),
+        '--directory', test_directory.name,
+    ]
+    test_redis_address = 'redis://127.0.0.1:{}'.format(redis_port)
 
 
 def tearDownModule():
@@ -105,7 +111,7 @@ def err(p):
 class BaseTestCase(unittest.TestCase):
     identity = 0
     log = None
-    backend_overrides = {}
+    backend_options = []
 
     @classmethod
     def count(cls):
@@ -117,9 +123,9 @@ class BaseTestCase(unittest.TestCase):
         if os.path.isfile(LOG):
             os.remove(LOG)
         p = subprocess.Popen(
-            [sys.executable, '-m', 'snapfile'],
+            [sys.executable, *backend_arguments, *cls.backend_options],
             cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), '..')),
-            env={**backend_environment, **cls.backend_overrides},
+            env=backend_environment,
             # stdin=open(os.devnull),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE)
@@ -193,12 +199,12 @@ class BaseTestCase(unittest.TestCase):
         self.s.cookies.clear()
 
     def admit(self, size=53, metadata='opaque-metadata'):
-        return self.s.post('/uploads', json={'size': size, 'metadata': metadata})
+        return self.s.post('/files', json={'size': size, 'metadata': metadata})
 
     def upload(self, data, metadata='opaque-metadata'):
         admitted = self.admit(len(data), metadata)
         self.assertEqual(admitted.status_code, 201)
-        return self.s.put('/uploads/' + admitted.json()['token'], data=data,
+        return self.s.put('/files/' + admitted.json()['token'], data=data,
                           headers={'Content-Type': 'application/octet-stream'})
 
     def ws(self):
@@ -292,7 +298,7 @@ class TestMessaging(BaseTestCase):
         self.assertEqual(echoed['data'], envelope)
         self.assertEqual(echoed['id'], 0)
         identity = hashlib.sha256(self.i.encode()).hexdigest()
-        with Redis.from_url(backend_environment['REDIS_ADDRESS']) as store:
+        with Redis.from_url(test_redis_address) as store:
             persisted = store.lindex('messages:' + identity, 0)
             self.assertNotIn(b'unique-private-plaintext', persisted)
             self.assertEqual(json.loads(persisted)['data'], envelope)
@@ -319,22 +325,32 @@ class TestMessaging(BaseTestCase):
         self.send(c, 'later good message')
 
     def test_history_pages_have_stable_ids_in_persisted_order(self):
+        from snapfile import config
         c = self.ws()
-        expected = [chat_envelope(str(index)) for index in range(19)]
-        for index in range(19):
+        count = 2 * config.HISTORY_PAGE_SIZE + 3
+        expected = [chat_envelope(str(index)) for index in range(count)]
+        for index in range(count):
             self.send(c, str(index))
         offset = 0
         replay = []
         while True:
             c.send(json.dumps({'action': 'pull', 'offset': offset}))
             response = json.loads(c.recv())
-            self.assertLessEqual(len(response['msgs']), 8)
+            self.assertEqual(len(response['msgs']), min(config.HISTORY_PAGE_SIZE, count - offset))
             replay.extend(response['msgs'])
             offset = response['next_offset']
             if not response['more']:
                 break
-        self.assertEqual([m['id'] for m in replay], list(range(19)))
+        self.assertEqual([m['id'] for m in replay], list(range(count)))
         self.assertEqual([m['data'] for m in replay], expected)
+
+    def test_invalid_history_offset_has_specific_error(self):
+        c = self.ws()
+        for offset in [-1, True, '0', None, 2**53]:
+            c.send(json.dumps({'action': 'pull', 'offset': offset}))
+            self.assertEqual(json.loads(c.recv()), {
+                'action': 'error', 'message': 'History offset must be a nonnegative safe integer'
+            })
 
     def test_maximum_message_and_websocket_frame_limit(self):
         c = self.ws()
@@ -461,10 +477,8 @@ def nginx_download_location():
 
 
 class TestDownloadConfig(unittest.TestCase):
-    def load_config(self, environment, override=None):
+    def load_config(self, environment):
         variables = {} if environment is None else {'ENV': environment}
-        if override is not None:
-            variables['SNAPFILE_USE_X_ACCEL_REDIRECT'] = override
         with patch.dict(os.environ, variables, clear=True):
             return runpy.run_path(str(Path(__file__).resolve().parents[1] / 'snapfile/config.py'))
 
@@ -473,19 +487,29 @@ class TestDownloadConfig(unittest.TestCase):
             with self.subTest(environment=environment):
                 self.assertEqual(self.load_config(environment)['USE_X_ACCEL_REDIRECT'],
                                  environment == 'PROD')
+                self.assertEqual(self.load_config(environment)['HOST'],
+                                 '127.0.0.1' if environment in ('TEST', 'E2E') else None)
+                self.assertEqual(self.load_config(environment)['HISTORY_PAGE_SIZE'], 64)
 
-    def test_explicit_overrides(self):
-        for environment in ['PROD', 'DEV', 'TEST', 'E2E']:
-            for value in ['true', '1', 'yes', 'on', ' TRUE ']:
-                with self.subTest(environment=environment, value=value):
-                    self.assertTrue(self.load_config(environment, value)['USE_X_ACCEL_REDIRECT'])
-            for value in ['false', '0', 'no', 'off', ' FALSE ']:
-                with self.subTest(environment=environment, value=value):
-                    self.assertFalse(self.load_config(environment, value)['USE_X_ACCEL_REDIRECT'])
-        for value in ['', ' ', 'enabled', '2', 'truthy']:
-            with self.subTest(value=value):
-                with self.assertRaisesRegex(ValueError, 'SNAPFILE_USE_X_ACCEL_REDIRECT'):
-                    self.load_config('PROD', value)
+    def test_test_settings_are_hardcoded_and_ignore_environment_overrides(self):
+        config_path = str(Path(__file__).resolve().parents[1] / 'snapfile/config.py')
+        for environment in ['TEST', 'E2E']:
+            with patch.dict(os.environ, {
+                'ENV': environment, 'SNAPFILE_QUOTA': '1', 'SNAPFILE_PORT': '1',
+                'REDIS_ADDRESS': 'redis://not-a-test-server',
+                'SNAPFILE_UPLOAD': '/not-a-test-directory', 'SNAPFILE_LOG': '/not-a-test-log',
+                'SNAPFILE_USE_X_ACCEL_REDIRECT': 'true',
+            }, clear=True):
+                actual = runpy.run_path(config_path)
+            expected = self.load_config(environment)
+            for field in ['PORT', 'REDIS_ADDRESS', 'UPLOAD_ROOT_DIRECTORY', 'LOG_FILE',
+                          'STORAGE_PER_FOLDER', 'USE_X_ACCEL_REDIRECT']:
+                self.assertEqual(actual[field], expected[field])
+        self.assertEqual(self.load_config('E2E')['STORAGE_PER_FOLDER'], 96 * 1024 * 1024)
+        self.assertEqual(self.load_config('TEST')['UPLOAD_ADMISSION_TIMEOUT'], 60)
+        self.assertEqual(self.load_config('TEST')['UPLOAD_READ_TIMEOUT'], 30)
+        self.assertEqual(self.load_config('TEST')['MAX_PENDING_UPLOADS'], 8)
+        self.assertEqual(self.load_config('TEST')['MAX_FILE_METADATA'], 24000)
 
     def test_nginx_internal_ciphertext_mapping(self):
         location = nginx_download_location()
@@ -510,13 +534,52 @@ class TestDownloadConfig(unittest.TestCase):
                 self.assertIsNone(re.fullmatch(allowed, path))
 
 
+class TestMessagePersistence(unittest.IsolatedAsyncioTestCase):
+    async def test_quota_changes_only_after_persistence_succeeds(self):
+        from snapfile import model
+        folder = model.Folder('a' * 64, path='1/' + 'a' * 64, current_size=10)
+        message = model.Message(type=model.MsgType.FILE, data='opaque', size=53,
+                                sender='test', file_id='7')
+        transaction = MagicMock()
+        transaction.__aenter__.return_value = transaction
+        transaction.execute = AsyncMock(return_value=(4, True))
+        store = MagicMock()
+        store.pipeline.return_value = transaction
+        with patch.object(model, 'redis', store):
+            await folder._save(message)
+        self.assertEqual(folder.current_size, 63)
+        self.assertEqual(message.id, 3)
+        self.assertEqual(message.file_id, '7')
+        self.assertEqual(json.loads(transaction.set.call_args.args[1])['current_size'], 63)
+
+    async def test_failed_persistence_does_not_charge_in_memory_quota(self):
+        from snapfile import model
+        for failure in [RuntimeError('Redis unavailable'), (0, False)]:
+            with self.subTest(failure=failure):
+                folder = model.Folder('a' * 64, path='1/' + 'a' * 64, current_size=10)
+                message = model.Message(type=model.MsgType.TEXT, data='opaque', size=53, sender='test')
+                transaction = MagicMock()
+                transaction.__aenter__.return_value = transaction
+                transaction.execute = AsyncMock()
+                if isinstance(failure, Exception):
+                    transaction.execute.side_effect = failure
+                else:
+                    transaction.execute.return_value = failure
+                store = MagicMock()
+                store.pipeline.return_value = transaction
+                with patch.object(model, 'redis', store):
+                    with self.assertRaises(RuntimeError):
+                        await folder._save(message)
+                self.assertEqual(folder.current_size, 10)
+                self.assertIsNone(message.id)
+
+
 class TestFileDownloads(BaseTestCase):
     accelerated = False
-    backend_overrides = {'SNAPFILE_USE_X_ACCEL_REDIRECT': 'false'}
 
     def stored_path(self, file_id):
         identity = hashlib.sha256(self.i.encode()).hexdigest()
-        with Redis.from_url(backend_environment['REDIS_ADDRESS']) as store:
+        with Redis.from_url(test_redis_address) as store:
             folder = json.loads(store.get('folder:' + identity))
         return folder['path'] + '/' + file_id
 
@@ -526,7 +589,7 @@ class TestFileDownloads(BaseTestCase):
         self.assertEqual(upload.status_code, 200)
         file_id = upload.json()['id']
         relative_path = self.stored_path(file_id)
-        self.assertEqual((Path(backend_environment['SNAPFILE_UPLOAD']) / relative_path).read_bytes(),
+        self.assertEqual((Path(upload_directory) / relative_path).read_bytes(),
                          ciphertext)
         response = self.s.get('/files', params={'id': file_id})
         self.assertEqual(response.status_code, 200)
@@ -542,17 +605,23 @@ class TestFileDownloads(BaseTestCase):
             self.assertNotIn('X-Accel-Redirect', response.headers)
             self.assertEqual(response.content, ciphertext)
 
-    def test_invalid_ids_and_filename_queries(self):
+    def test_invalid_ids_and_ignored_filename_queries(self):
         for file_id in ['', '../1', '1/../1', '1.part', '-1', ' 1', '1%2f', '\u0661', '\uff11',
                         '1\r\nX-Injected: yes']:
             with self.subTest(file_id=file_id):
                 response = self.s.get('/files', params={'id': file_id})
                 self.assertEqual(response.status_code, 400)
                 self.assertNotIn('X-Accel-Redirect', response.headers)
-        response = self.s.get('/files', params={'id': '1', 'name': 'private-original-name.txt'})
-        self.assertEqual(response.status_code, 400)
+        upload = self.upload(bytes(range(53)))
+        self.assertEqual(upload.status_code, 200)
+        file_id = upload.json()['id']
+        original = self.s.get('/files', params={'id': file_id})
+        response = self.s.get('/files', params={'id': file_id, 'name': '../private-original-name.txt'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, original.content)
+        self.assertEqual(response.headers.get('X-Accel-Redirect'), original.headers.get('X-Accel-Redirect'))
+        self.assertEqual(response.headers['Content-Disposition'], 'attachment')
         self.assertNotIn('private-original-name.txt', str(response.headers) + response.text)
-        self.assertNotIn('X-Accel-Redirect', response.headers)
 
     def test_missing_and_removed_files(self):
         response = self.s.get('/files', params={'id': '999'})
@@ -561,7 +630,7 @@ class TestFileDownloads(BaseTestCase):
         upload = self.upload(bytes(range(53)))
         self.assertEqual(upload.status_code, 200)
         file_id = upload.json()['id']
-        (Path(backend_environment['SNAPFILE_UPLOAD']) / self.stored_path(file_id)).unlink()
+        (Path(upload_directory) / self.stored_path(file_id)).unlink()
         response = self.s.get('/files', params={'id': file_id})
         self.assertEqual(response.status_code, 404)
         self.assertNotIn('X-Accel-Redirect', response.headers)
@@ -583,7 +652,7 @@ class TestFileDownloads(BaseTestCase):
 
 class TestAcceleratedDownloads(TestFileDownloads):
     accelerated = True
-    backend_overrides = {'SNAPFILE_USE_X_ACCEL_REDIRECT': 'true'}
+    backend_options = ['--x-accel-redirect']
 
     @unittest.skipUnless(shutil.which('nginx'), 'Native NGINX is not installed')
     def test_native_nginx_ciphertext_round_trip(self):
@@ -596,7 +665,7 @@ class TestAcceleratedDownloads(TestFileDownloads):
             prefix = Path(directory).resolve()
             port = free_port()
             location = nginx_download_location().replace(
-                '/var/www/snapfile/files/', backend_environment['SNAPFILE_UPLOAD'] + '/')
+                '/var/www/snapfile/files/', upload_directory + '/')
             configuration = prefix / 'nginx.conf'
             configuration.write_text(
                 'worker_processes 1;\nerror_log stderr;\npid nginx.pid;\n'
@@ -682,11 +751,11 @@ class TestEncryptedUploads(BaseTestCase):
 
     def test_opaque_round_trip_and_stale_client_rejection(self):
         response = self.s.post('/files', files=[('myfile[]', ('plaintext.txt', 'plaintext'))])
-        self.assertEqual(response.status_code, 405)
+        self.assertEqual(response.status_code, 400)
         admission = self.admit()
         self.assertEqual(admission.status_code, 201)
         data = bytes(range(53))
-        response = self.s.put('/uploads/' + admission.json()['token'], data=data,
+        response = self.s.put('/files/' + admission.json()['token'], data=data,
                               headers={'Content-Type': 'application/octet-stream'})
         self.assertEqual(response.status_code, 200)
         result = self.s.get('/files', params={'id': response.json()['id']})
@@ -698,7 +767,7 @@ class TestEncryptedUploads(BaseTestCase):
     def test_overflow_and_underflow_cleanup(self):
         for size, status in [(54, 413), (52, 400)]:
             token = self.admit().json()['token']
-            response = self.s.put('/uploads/' + token, data=b'x' * size,
+            response = self.s.put('/files/' + token, data=b'x' * size,
                                   headers={'Content-Type': 'application/octet-stream'})
             self.assertEqual(response.status_code, status)
             self.assert_no_partial()
@@ -710,12 +779,12 @@ class TestEncryptedUploads(BaseTestCase):
         def reserve():
             with requests.Session() as client:
                 client.raw_cookie = self.cookie
-                return client.post('/uploads', json={'size': 600000, 'metadata': 'opaque'})
+                return client.post('/files', json={'size': 600000, 'metadata': 'opaque'})
         with ThreadPoolExecutor(max_workers=2) as pool:
             responses = list(pool.map(lambda _: reserve(), range(2)))
         self.assertEqual(sorted(r.status_code for r in responses), [201, 431])
         token = next(r for r in responses if r.status_code == 201).json()['token']
-        self.assertEqual(self.s.delete('/uploads/' + token).status_code, 204)
+        self.assertEqual(self.s.delete('/files/' + token).status_code, 204)
         self.assertEqual(self.admit(600000).status_code, 201)
 
     def test_text_messages_respect_upload_reservations(self):
@@ -732,17 +801,38 @@ class TestEncryptedUploads(BaseTestCase):
             self.assertEqual(self.admit(value).status_code, 400)
         self.assertEqual(self.admit(53, 'x' * 24001).status_code, 400)
         for data in [[], 'string', None]:
-            self.assertEqual(self.s.post('/uploads', json=data).status_code, 400)
+            self.assertEqual(self.s.post('/files', json=data).status_code, 400)
         self.assertEqual(self.s.get('/files', params={'id': '../../etc/passwd'}).status_code, 400)
-        self.assertEqual(self.s.get('/files', params={'id': '1', 'name': 'plaintext.txt'}).status_code, 400)
+        self.assertEqual(self.s.get('/files', params={'id': '1', 'name': 'plaintext.txt'}).status_code, 404)
         self.assertEqual(self.s.get('/files').status_code, 400)
 
 
 class TestStoredFolderValidation(BaseTestCase):
+    def test_over_quota_folder_can_reopen_and_download_but_not_add_data(self):
+        ciphertext = bytes(range(53))
+        response = self.upload(ciphertext)
+        self.assertEqual(response.status_code, 200)
+        file_id = response.json()['id']
+        identity = hashlib.sha256(self.i.encode()).hexdigest()
+        key = 'folder:' + identity
+        with Redis.from_url(test_redis_address) as store:
+            record = json.loads(store.get(key))
+            # Evict the active folder through a rejected login, then lower its quota.
+            store.set(key, json.dumps({**record, 'file_format': 'unsupported'}))
+            self.assertEqual(self.s.post('/login', data={'identity': self.i}).status_code, 409)
+            record['storage_limit'] = record['current_size'] - 1
+            store.set(key, json.dumps(record))
+        self.assertEqual(self.s.post('/login', data={'identity': self.i}).status_code, 200)
+        self.assertEqual(self.s.get('/files', params={'id': file_id}).content, ciphertext)
+        self.assertEqual(self.admit().status_code, 431)
+        c = self.ws()
+        c.send(json.dumps({'action': 'send', 'data': chat_envelope('over quota')}))
+        self.assertEqual(json.loads(c.recv())['message'], 'Storage space not enough')
+
     def test_old_and_malformed_records_fail_without_rewriting_data(self):
         identity = hashlib.sha256(self.i.encode()).hexdigest()
         key = 'folder:' + identity
-        with Redis.from_url(backend_environment['REDIS_ADDRESS']) as store:
+        with Redis.from_url(test_redis_address) as store:
             original = store.get(key)
             record = json.loads(original)
             self.assertEqual(record['file_format'], 'SNAPFE02')
@@ -771,7 +861,7 @@ class TestStoredFolderValidation(BaseTestCase):
 
     def test_reaper_skips_old_records_and_keeps_their_files(self):
         identity = 'old-folder-without-version'
-        path = Path(backend_environment['SNAPFILE_UPLOAD']) / '1' / identity
+        path = Path(upload_directory) / '1' / identity
         path.mkdir(parents=True)
         saved = path / '1'
         saved.write_bytes(b'pre-existing user data')
@@ -781,7 +871,7 @@ class TestStoredFolderValidation(BaseTestCase):
             'age': 1, 'storage_limit': 1000, 'current_size': 22,
             'path': '1/' + identity
         }).encode()
-        with Redis.from_url(backend_environment['REDIS_ADDRESS']) as store:
+        with Redis.from_url(test_redis_address) as store:
             store.set(key, record)
             sleep(6.5)
             self.assertEqual(store.get(key), record)

@@ -12,10 +12,9 @@ from aiohttp import web
 from aiohttp_session import SimpleCookieStorage, session_middleware
 import aiohttp_security
 
-from . import model
+from . import model, uploads
 from .auth import SimpleAuthorizationPolicy
 from .views import signup, login, logout, allow, index, ws, download
-from . import uploads
 
 
 log = logging.getLogger(__name__)
@@ -42,10 +41,10 @@ def init_app():
         web.post('/login', login),
         web.post('/logout', logout),
         web.get('/auth', allow),
-        web.get('/files', download),
-        web.post('/uploads', uploads.admit),
-        web.put('/uploads/{token}', uploads.upload),
-        web.delete('/uploads/{token}', uploads.cancel),
+        web.get('/files', download), # Download committed ciphertext by file ID.
+        web.post('/files', uploads.admit), # Reserve quota for size + encrypted metadata.
+        web.put('/files/{token}', uploads.upload), # Stream ciphertext for one reservation.
+        web.delete('/files/{token}', uploads.cancel), # Cancel/release that reservation.
         web.get('/', index, name='index'), # static does not support redirect / to /index.html
         web.get('/index.html', index), # serve a single static file with auth
     ]
@@ -84,8 +83,7 @@ def main():
         # (which would raise an opaque UnboundLocalError).
         log.exception('Failed to start!!')
         raise
-    host = '127.0.0.1' if config.ENV in ('TEST', 'E2E') else None
-    web.run_app(app, host=host, port=config.PORT)
+    web.run_app(app, host=config.HOST, port=config.PORT)
 
 
 if __name__ == '__main__':

@@ -2,6 +2,7 @@
 import os
 
 PROD = False
+HOST = None # Bind all interfaces in DEV/PROD; NGINX normally fronts production.
 PORT = 8090
 REDIS_ADDRESS = 'redis://localhost'
 REDIS_DB = 0
@@ -15,53 +16,44 @@ UPLOAD_SECOND_DIRECTORY_RANGE = 2**10
 DELETE_INTERVAL = 24*60*60 # seconds i.e., daily
 HEARTBEAT = 30 # seconds
 RECEIVE_TIMEOUT = 3600 # 1 hour
+HISTORY_PAGE_SIZE = 64
+UPLOAD_ADMISSION_TIMEOUT = 60
+UPLOAD_READ_TIMEOUT = 30
+MAX_PENDING_UPLOADS = 8
+MAX_FILE_METADATA = 24000
+USE_X_ACCEL_REDIRECT = False
 
 # PROD or TEST
 ENV = os.environ.get('ENV')
 if ENV == 'PROD':
     PROD = True
+    USE_X_ACCEL_REDIRECT = True
     PORT = 8080
     REDIS_DB = 1
     LOG_LEVEL = 'DEBUG'
     LOG_FILE = None # rely on supervisord to manage log rotation
     UPLOAD_ROOT_DIRECTORY = '/var/www/snapfile/files'
 elif ENV == 'TEST':
+    HOST = '127.0.0.1'
     AGE = 8
     LOG_FILE = 'test.log'
     STORAGE_PER_FOLDER = 10**6 # 1 MB
     DELETE_INTERVAL = 6
-    REDIS_ADDRESS = os.environ.get('REDIS_ADDRESS', 'redis://127.0.0.1:6391')
-    PORT = int(os.environ.get('SNAPFILE_PORT', 8090))
-    LOG_FILE = os.environ.get('SNAPFILE_LOG', 'test.log')
-    UPLOAD_ROOT_DIRECTORY = os.environ.get('SNAPFILE_UPLOAD', './upload_test')
+    REDIS_ADDRESS = 'redis://127.0.0.1:6391'
+    UPLOAD_ROOT_DIRECTORY = './upload_test'
 elif ENV == 'E2E':
-    # Dedicated configuration for the Playwright end-to-end suite.
-    # The e2e launcher (client/tests/e2e/server.mjs) starts an isolated, in-memory
-    # Redis and an upload directory just for the test run and points us at them
-    # via the env vars below, so a run never touches dev/prod data.
-    #
-    # The defaults are deliberately *fail-safe*: they point at the launcher's
-    # ephemeral Redis (:6390, started only for tests) and a separate db, never
-    # the developer's real instance. So even `ENV=E2E python -m snapfile` run by
-    # hand will refuse to connect rather than flush localhost:6379 db0, which
-    # startup() would otherwise wipe (it flushes for any non-PROD env).
-    PORT = int(os.environ.get('SNAPFILE_PORT', 8091))
-    REDIS_ADDRESS = os.environ.get('REDIS_ADDRESS', 'redis://127.0.0.1:6390')
-    REDIS_DB = int(os.environ.get('REDIS_DB', 15)) # distinct from dev(0)/prod(1)
-    UPLOAD_ROOT_DIRECTORY = os.environ.get('SNAPFILE_UPLOAD', './upload_e2e')
-    LOG_FILE = os.environ.get('SNAPFILE_LOG', 'e2e.log')
+    # Test launchers override ports/paths in-process with private resources.
+    # These standalone defaults never point at the normal DEV/PROD Redis DB.
+    HOST = '127.0.0.1'
+    PORT = 8091
+    REDIS_ADDRESS = 'redis://127.0.0.1:6390'
+    REDIS_DB = 15
+    UPLOAD_ROOT_DIRECTORY = './upload_e2e'
+    LOG_FILE = 'e2e.log'
     # Folders must outlive the whole suite, so keep them long-lived and do not
     # let the background reaper delete anything mid-test.
     AGE = 24*60*60
     DELETE_INTERVAL = 24*60*60
-    STORAGE_PER_FOLDER = int(os.environ.get('SNAPFILE_QUOTA', 10**7))
+    STORAGE_PER_FOLDER = 96 * 1024 * 1024
 else: # DEV
     DELETE_INTERVAL = 60
-
-USE_X_ACCEL_REDIRECT = PROD
-_x_accel_override = os.environ.get('SNAPFILE_USE_X_ACCEL_REDIRECT')
-if _x_accel_override is not None:
-    _x_accel_override = _x_accel_override.strip().lower()
-    if _x_accel_override not in ('true', 'false', '1', '0', 'yes', 'no', 'on', 'off'):
-        raise ValueError('SNAPFILE_USE_X_ACCEL_REDIRECT must be true/false, 1/0, yes/no or on/off')
-    USE_X_ACCEL_REDIRECT = _x_accel_override in ('true', '1', 'yes', 'on')

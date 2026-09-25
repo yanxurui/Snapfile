@@ -437,12 +437,12 @@ async function uploadFiles(files) {
           }
         });
         // Finish admission before streaming; the fetch upload response is half-duplex.
-        const admission = await checked(await fetch('/uploads', {
+        const admission = await checked(await fetch('/files', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ size: encrypted.size, metadata: encrypted.metadata }), signal
         }));
         ({ token } = await admission.json());
-        await checked(await fetch(`/uploads/${token}`, {
+        await checked(await fetch(`/files/${token}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' },
           body: encrypted.body, duplex: 'half', signal
         }));
@@ -450,7 +450,7 @@ async function uploadFiles(files) {
         count += 1;
       } finally {
         encrypted?.dispose();
-        if (token) await checked(await fetch(`/uploads/${token}`, { method: 'DELETE' }));
+        if (token) await checked(await fetch(`/files/${token}`, { method: 'DELETE' }));
       }
     }
     percentText.value = `Success: ${count} file(s) uploaded (server confirmed)`;

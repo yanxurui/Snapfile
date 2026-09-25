@@ -23,7 +23,7 @@ test('secure H2 upload, ciphertext storage, private metadata and short-fragment 
   await session.send('Network.enable');
   const protocols = [];
   session.on('Network.responseReceived', event => {
-    if (event.response.url.includes('/uploads/')) protocols.push(event.response.protocol);
+    if (event.response.url.includes('/files/')) protocols.push(event.response.protocol);
   });
   const before = new Set(await storedFiles());
   const passcode = await createFolder(page);
@@ -107,7 +107,7 @@ test('stale multipart clients cannot store plaintext files', async ({ page }) =>
     body.append('myfile[]', new File(['plaintext'], 'stale.txt'));
     return (await fetch('/files', { method: 'POST', body })).status;
   });
-  expect(status).toBe(405);
+  expect(status).toBe(400);
   expect(await storedFiles()).toEqual(before);
   await expect(messageRow(page, 'stale.txt')).toHaveCount(0);
 });
@@ -180,7 +180,7 @@ test('canceling an active UI download aborts without replacing the destination',
 test('Cancel upload removes partial ciphertext and allows a new upload', async ({ page }) => {
   await createFolder(page);
   const before = new Set(await storedFiles());
-  await page.route('**/uploads/*', route => route.continue({
+  await page.route('**/files/*', route => route.continue({
     headers: { ...route.request().headers(), 'x-e2e-slow-upload': '1' }
   }));
   await uploadFile(page, 'cancel-upload.bin', Buffer.alloc(8 * 1048576, 9));
@@ -216,11 +216,11 @@ test('64 MiB streaming reaches disk early, obeys network backpressure and cancel
       }
     };
     const encrypted = await streams.encryptFile(file, key, { metrics: window.measurement });
-    const admission = await fetch('/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const admission = await fetch('/files', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ size: encrypted.size, metadata: encrypted.metadata }) });
     window.admission = await admission.json();
     window.controller = new AbortController();
-    window.transfer = fetch(`/uploads/${window.admission.token}`, {
+    window.transfer = fetch(`/files/${window.admission.token}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/octet-stream', 'x-e2e-slow-upload': '1' },
       body: encrypted.body, duplex: 'half', signal: window.controller.signal
     }).then(response => { window.transferStatus = response.status; },
@@ -246,13 +246,13 @@ test('64 MiB streaming reaches disk early, obeys network backpressure and cancel
   await page.evaluate(async () => {
     window.controller.abort();
     await window.transfer;
-    await fetch(`/uploads/${window.admission.token}`, { method: 'DELETE' });
+    await fetch(`/files/${window.admission.token}`, { method: 'DELETE' });
   });
   await expect.poll(async () => (await storedFiles()).filter(file => !before.has(file)).length).toBe(0);
   const recovered = await page.evaluate(async () => {
-    const response = await fetch('/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const response = await fetch('/files', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ size: 95 * 1048576, metadata: 'opaque' }) });
-    if (response.ok) await fetch(`/uploads/${(await response.json()).token}`, { method: 'DELETE' });
+    if (response.ok) await fetch(`/files/${(await response.json()).token}`, { method: 'DELETE' });
     return response.status;
   });
   expect(recovered).toBe(201);
@@ -277,11 +277,11 @@ test('32 MiB completes a bounded upload and authenticated disk-backed download',
       }
     };
     const encrypted = await streams.encryptFile(file, key, { metrics: uploadMetrics });
-    const admitted = await fetch('/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const admitted = await fetch('/files', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ size: encrypted.size, metadata: encrypted.metadata }) });
     if (!admitted.ok) throw new Error(await admitted.text());
     const { token } = await admitted.json();
-    const uploaded = await fetch(`/uploads/${token}`, { method: 'PUT',
+    const uploaded = await fetch(`/files/${token}`, { method: 'PUT',
       headers: { 'Content-Type': 'application/octet-stream' }, body: encrypted.body, duplex: 'half' });
     if (!uploaded.ok) throw new Error(await uploaded.text());
     const { id } = await uploaded.json();
@@ -329,10 +329,10 @@ test('wrong metadata key aborts a real disk destination', async ({ page }) => {
     const { key } = await streams.credentials(localStorage.getItem('identity'));
     const wrong = (await streams.credentials('wrongkey')).key;
     const file = await streams.encryptFile(new File(['secret'], 'wrong.bin'), key);
-    const admitted = await fetch('/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const admitted = await fetch('/files', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ size: file.size, metadata: file.metadata }) });
     const { token } = await admitted.json();
-    const uploaded = await fetch(`/uploads/${token}`, { method: 'PUT', duplex: 'half',
+    const uploaded = await fetch(`/files/${token}`, { method: 'PUT', duplex: 'half',
       headers: { 'Content-Type': 'application/octet-stream' }, body: file.body });
     const { id } = await uploaded.json();
     const root = await navigator.storage.getDirectory();
