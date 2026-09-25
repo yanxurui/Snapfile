@@ -28,7 +28,6 @@ LOG = None
 test_directory = None
 redis_process = None
 backend_environment = None
-backend_arguments = None
 upload_directory = None
 test_redis_address = None
 
@@ -46,7 +45,7 @@ def free_port():
 
 
 def setUpModule():
-    global HOST, LOG, test_directory, redis_process, backend_environment, backend_arguments, upload_directory
+    global HOST, LOG, test_directory, redis_process, backend_environment, upload_directory
     global test_redis_address
     test_directory = tempfile.TemporaryDirectory(prefix='snapfile-api-', dir=os.path.dirname(__file__))
     redis_port = free_port()
@@ -65,14 +64,13 @@ def setUpModule():
             sleep(0.05)
     else:
         raise RuntimeError('Isolated test Redis failed to start')
-    backend_environment = {**os.environ, 'ENV': 'TEST'}
     upload_directory = os.path.join(test_directory.name, 'uploads')
-    backend_arguments = [
-        str(Path(__file__).resolve().with_name('run_server.py')),
-        '--environment', 'TEST', '--port', str(port), '--redis-port', str(redis_port),
-        '--directory', test_directory.name,
-    ]
     test_redis_address = 'redis://127.0.0.1:{}'.format(redis_port)
+    backend_environment = {
+        **os.environ, 'ENV': 'TEST', 'SNAPFILE_PORT': str(port),
+        'REDIS_ADDRESS': test_redis_address, 'SNAPFILE_UPLOAD': upload_directory,
+        'SNAPFILE_LOG': LOG, 'SNAPFILE_USE_X_ACCEL_REDIRECT': '0',
+    }
 
 
 def tearDownModule():
@@ -111,7 +109,7 @@ def err(p):
 class BaseTestCase(unittest.TestCase):
     identity = 0
     log = None
-    backend_options = []
+    backend_overrides = {}
 
     @classmethod
     def count(cls):
@@ -123,9 +121,9 @@ class BaseTestCase(unittest.TestCase):
         if os.path.isfile(LOG):
             os.remove(LOG)
         p = subprocess.Popen(
-            [sys.executable, *backend_arguments, *cls.backend_options],
+            [sys.executable, '-m', 'snapfile'],
             cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), '..')),
-            env=backend_environment,
+            env={**backend_environment, **cls.backend_overrides},
             # stdin=open(os.devnull),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE)
@@ -477,8 +475,9 @@ def nginx_download_location():
 
 
 class TestDownloadConfig(unittest.TestCase):
-    def load_config(self, environment):
+    def load_config(self, environment, **overrides):
         variables = {} if environment is None else {'ENV': environment}
+        variables.update(overrides)
         with patch.dict(os.environ, variables, clear=True):
             return runpy.run_path(str(Path(__file__).resolve().parents[1] / 'snapfile/config.py'))
 
@@ -491,21 +490,47 @@ class TestDownloadConfig(unittest.TestCase):
                                  '127.0.0.1' if environment in ('TEST', 'E2E') else None)
                 self.assertEqual(self.load_config(environment)['HISTORY_PAGE_SIZE'], 64)
 
-    def test_test_settings_are_hardcoded_and_ignore_environment_overrides(self):
-        config_path = str(Path(__file__).resolve().parents[1] / 'snapfile/config.py')
+    def test_test_resource_overrides(self):
+        overrides = {
+            'SNAPFILE_PORT': '18092', 'REDIS_ADDRESS': 'redis://127.0.0.1:16391',
+            'SNAPFILE_UPLOAD': '/private-test/uploads', 'SNAPFILE_LOG': '/private-test/backend.log',
+            'SNAPFILE_USE_X_ACCEL_REDIRECT': '1',
+        }
         for environment in ['TEST', 'E2E']:
-            with patch.dict(os.environ, {
-                'ENV': environment, 'SNAPFILE_QUOTA': '1', 'SNAPFILE_PORT': '1',
-                'REDIS_ADDRESS': 'redis://not-a-test-server',
-                'SNAPFILE_UPLOAD': '/not-a-test-directory', 'SNAPFILE_LOG': '/not-a-test-log',
-                'SNAPFILE_USE_X_ACCEL_REDIRECT': 'true',
-            }, clear=True):
-                actual = runpy.run_path(config_path)
+            with self.subTest(environment=environment):
+                actual = self.load_config(environment, **overrides)
+                self.assertEqual(actual['PORT'], 18092)
+                self.assertEqual(actual['REDIS_ADDRESS'], overrides['REDIS_ADDRESS'])
+                self.assertEqual(actual['UPLOAD_ROOT_DIRECTORY'], overrides['SNAPFILE_UPLOAD'])
+                self.assertEqual(actual['LOG_FILE'], overrides['SNAPFILE_LOG'])
+                self.assertTrue(actual['USE_X_ACCEL_REDIRECT'])
+                self.assertFalse(self.load_config(environment,
+                    SNAPFILE_USE_X_ACCEL_REDIRECT='0')['USE_X_ACCEL_REDIRECT'])
+
+    def test_resource_overrides_do_not_affect_dev_or_prod(self):
+        for environment in [None, 'DEV', 'PROD']:
+            actual = self.load_config(environment, SNAPFILE_PORT='not-a-port',
+                REDIS_ADDRESS='redis://not-a-test-server', SNAPFILE_UPLOAD='/not-a-test-directory',
+                SNAPFILE_LOG='/not-a-test-log', SNAPFILE_USE_X_ACCEL_REDIRECT='invalid')
             expected = self.load_config(environment)
             for field in ['PORT', 'REDIS_ADDRESS', 'UPLOAD_ROOT_DIRECTORY', 'LOG_FILE',
-                          'STORAGE_PER_FOLDER', 'USE_X_ACCEL_REDIRECT']:
+                          'USE_X_ACCEL_REDIRECT']:
                 self.assertEqual(actual[field], expected[field])
-        self.assertEqual(self.load_config('E2E')['STORAGE_PER_FOLDER'], 96 * 1024 * 1024)
+
+    def test_invalid_test_overrides_fail_explicitly(self):
+        for environment in ['TEST', 'E2E']:
+            for name, values in [
+                ('SNAPFILE_PORT', ['0', '65536', 'not-a-port']),
+                ('SNAPFILE_USE_X_ACCEL_REDIRECT', ['', 'true', '2']),
+            ]:
+                for value in values:
+                    with self.subTest(environment=environment, name=name, value=value):
+                        with self.assertRaises(ValueError):
+                            self.load_config(environment, **{name: value})
+
+    def test_test_limits_remain_hardcoded(self):
+        for environment, quota in [('TEST', 10**6), ('E2E', 96 * 1024 * 1024)]:
+            self.assertEqual(self.load_config(environment, SNAPFILE_QUOTA='1')['STORAGE_PER_FOLDER'], quota)
         self.assertEqual(self.load_config('TEST')['UPLOAD_ADMISSION_TIMEOUT'], 60)
         self.assertEqual(self.load_config('TEST')['UPLOAD_READ_TIMEOUT'], 30)
         self.assertEqual(self.load_config('TEST')['MAX_PENDING_UPLOADS'], 8)
@@ -652,7 +677,7 @@ class TestFileDownloads(BaseTestCase):
 
 class TestAcceleratedDownloads(TestFileDownloads):
     accelerated = True
-    backend_options = ['--x-accel-redirect']
+    backend_overrides = {'SNAPFILE_USE_X_ACCEL_REDIRECT': '1'}
 
     @unittest.skipUnless(shutil.which('nginx'), 'Native NGINX is not installed')
     def test_native_nginx_ciphertext_round_trip(self):

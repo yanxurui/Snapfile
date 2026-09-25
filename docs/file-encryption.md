@@ -1,21 +1,17 @@
-# Browser encryption: files v2 and chat v1
+# Browser encryption
 
 ## Scope and access
 
-Browser-encrypted files and chat are the only supported application path.
-This is a breaking change: pre-existing folder records,
-passcodes and query share links have no compatibility or migration path. Users
-must create a new folder. Old data is not deleted or reinterpreted.
+The browser encrypts file contents, filename metadata and chat text before
+sending them to the server.
 
 Persisted folders must explicitly declare `file_format: "SNAPFE02"` and pass
-schema validation. Unsupported/versionless/malformed records produce a visible
+schema validation. Invalid records produce a visible
 login error and are skipped by the expiry cleaner with a warning, without
-rewriting or deleting their records or files. This storage marker and the
-authenticated ciphertext version identify formats, not selectable app protocols.
-`SNAPFE02` means Snapfile File Encryption format 02: the current secretstream
-layout. It is not an encryption on/off switch or a legacy compatibility mode.
+rewriting or deleting their records or files. `SNAPFE02` identifies the
+secretstream format described below.
 
-The browser normalizes the existing short passcode to lowercase and derives a
+The browser normalizes the passcode to lowercase and derives a
 32-byte master using PBKDF2-HMAC-SHA256, 310,000 iterations, salt
 `snapfile:passcode:v2`. Keyed BLAKE2b derives independent 32-byte values with
 `authentication`, `file-metadata` and `chat-message:v1` labels. Only the authentication value
@@ -25,9 +21,8 @@ file or chat keys directly from that token, but it **can guess short passcodes o
 The KDF does not turn a six-character code into a high-entropy secret.
 
 Share links put the same passcode in `#identity=...`, never in a query.
-The login page reads only fragment invites, with no special handling for old links.
-Authentication failures never send the raw passcode as a fallback. Local storage
-retains only the passcode; it does not select an application protocol.
+Local storage retains the passcode until logout. Authentication requests send
+only the derived token.
 
 ## Chat envelope and history
 
@@ -48,8 +43,8 @@ Whitespace, newlines, Unicode and links are preserved.
 
 The WebSocket inbound message limit is 96 KiB, including JSON. Quota is charged
 for the actual envelope length, ignoring client-supplied sizes, under the same
-lock as file reservations. Redis persists the envelope unchanged; no server
-chat cipher, derived chat key or server-side encryption layer remains.
+lock as file reservations. Redis persists the envelope unchanged; the server
+has no chat decryption key.
 
 History responses contain at most `config.HISTORY_PAGE_SIZE` messages (64 by
 default) and include `next_offset`
@@ -62,8 +57,7 @@ chat history still grows with the folder's messages; bounded file-transfer
 memory does not imply a constant-memory conversation UI.
 
 A message with a bad envelope produces a visible error row at its own position
-and does not stop subsequent messages. Earlier server-encrypted chat is not
-decrypted or migrated. Plaintext clients receive an explicit error and no quota
+and does not stop subsequent messages. Plaintext clients receive an explicit error and no quota
 charge. Local encryption/size/connection failures keep the draft; a server quota
 rejection is reported visibly after send.
 
@@ -160,8 +154,7 @@ before broadcasting it. `GET /files?id=<number>` returns the stored ciphertext
 unchanged, without needing a filename query. An extra `name` query is ignored,
 never used for paths or response headers; the browser never sends filenames.
 The common `/files` namespace handles downloads, JSON admission, streaming PUT
-and cancellation. Old multipart payloads and server-side file decryption are
-not supported. The server cannot authenticate ciphertext; the receiving browser
+and cancellation. The server cannot authenticate ciphertext; the receiving browser
 does that.
 
 An in-process per-folder lock covers quota reservations, chat charges and file
@@ -185,8 +178,7 @@ cache. Multiple independent workers are not supported by this accounting model.
 
 `USE_X_ACCEL_REDIRECT = False` is the default in `server/snapfile/config.py`;
 the PROD section overrides it with `True`. Change that section to `False` when
-running production without NGINX. There is no environment-variable flag parser;
-only `ENV` selects a config section.
+running production without NGINX.
 
 Both modes authorize the folder, validate the numeric file ID and check the
 file exists before responding. Enabled mode returns `X-Accel-Redirect` with
@@ -212,6 +204,13 @@ and File System Access support are required. aiohttp remains HTTP/1 behind the
 TLS/H2 proxy. nginx must disable request buffering for the streaming upload
 routes. Self-signed certificate acceptance in the isolated test context does not
 change the negotiated HTTP version or bypass Chromium's upload-stream restriction.
+
+The checked-in NGINX config uses `listen 443 ssl http2` for older CentOS hosts.
+For NGINX 1.25.1+, use `listen 443 ssl;` (also for IPv6) and `http2 on;`.
+Check `nginx -V` for `http_v2_module`, validate with `nginx -t`, and verify the
+browser's negotiated protocol. Keep `proxy_http_version 1.1` and
+`proxy_request_buffering off` for the separate upstream connection to aiohttp;
+an intervening proxy/CDN must not buffer the whole upload.
 
 File/message lengths, timing, order and sender information remain visible. The
 server receives only ciphertext and an authentication token, both of which

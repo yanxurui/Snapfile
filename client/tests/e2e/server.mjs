@@ -149,10 +149,15 @@ try {
 }
 
 // 2. snapfile backend --------------------------------------------------------
-const server = spawn(PYTHON, [resolve(repoRoot, 'server/tests/run_server.py'),
-  '--environment', 'E2E', '--port', SNAPFILE_PORT, '--redis-port', REDIS_PORT,
-  '--directory', runDirectory], {
+const server = spawn(PYTHON, ['-m', 'snapfile'], {
   cwd: resolve(repoRoot, 'server'),
+  env: {
+    ...process.env, ENV: 'E2E', SNAPFILE_PORT,
+    REDIS_ADDRESS: `redis://127.0.0.1:${REDIS_PORT}`,
+    SNAPFILE_UPLOAD: resolve(runDirectory, 'uploads'),
+    SNAPFILE_LOG: resolve(runDirectory, 'backend.log'),
+    SNAPFILE_USE_X_ACCEL_REDIRECT: '0',
+  },
   stdio: ['ignore', 'inherit', 'inherit'],
 });
 children.push(server);

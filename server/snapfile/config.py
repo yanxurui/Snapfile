@@ -42,7 +42,6 @@ elif ENV == 'TEST':
     REDIS_ADDRESS = 'redis://127.0.0.1:6391'
     UPLOAD_ROOT_DIRECTORY = './upload_test'
 elif ENV == 'E2E':
-    # Test launchers override ports/paths in-process with private resources.
     # These standalone defaults never point at the normal DEV/PROD Redis DB.
     HOST = '127.0.0.1'
     PORT = 8091
@@ -57,3 +56,16 @@ elif ENV == 'E2E':
     STORAGE_PER_FOLDER = 96 * 1024 * 1024
 else: # DEV
     DELETE_INTERVAL = 60
+
+if ENV in ('TEST', 'E2E'):
+    # Launchers provide private resources without changing DEV/PROD settings.
+    PORT = int(os.environ.get('SNAPFILE_PORT', PORT))
+    if not 1 <= PORT <= 65535:
+        raise ValueError('SNAPFILE_PORT must be between 1 and 65535')
+    REDIS_ADDRESS = os.environ.get('REDIS_ADDRESS', REDIS_ADDRESS)
+    UPLOAD_ROOT_DIRECTORY = os.environ.get('SNAPFILE_UPLOAD', UPLOAD_ROOT_DIRECTORY)
+    LOG_FILE = os.environ.get('SNAPFILE_LOG', LOG_FILE)
+    x_accel = os.environ.get('SNAPFILE_USE_X_ACCEL_REDIRECT', '0')
+    if x_accel not in ('0', '1'):
+        raise ValueError('SNAPFILE_USE_X_ACCEL_REDIRECT must be 0 or 1')
+    USE_X_ACCEL_REDIRECT = x_accel == '1'

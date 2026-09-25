@@ -1,137 +1,65 @@
-# End-to-end tests (Playwright)
+# Browser tests (Playwright)
 
-These tests drive a real Chromium browser against the **built client through a
-local TLS/HTTP2 proxy to the real aiohttp backend**, exercising encrypted file
-upload/download, browser-encrypted WebSocket chat and an isolated Redis. Browser CDP asserts
-the streamed upload actually negotiated `h2`, and the page asserts a secure
-context. No flag bypasses Chromium's streaming-request transport requirement.
+Chromium drives the built Vue client through a local TLS/HTTP2 proxy to aiohttp
+and isolated Redis. Tests cover login/sharing, encrypted chat and file transfers,
+including errors, quotas, cancellation and authenticated downloads.
+See the [encryption guide](../../../docs/file-encryption.md) for protocol details.
 
-They complement the backend unit tests in `server/tests/` (which test the API
-in isolation) by covering the browser/UI behaviour and the integration between
-the Vue client and the Python server.
+## Setup and commands
 
-## What is covered
-
-| Spec | Scenarios |
-| --- | --- |
-| `login.spec.js` | create a new folder, open an existing folder by passcode, wrong-passcode error, logout, redirect-to-login when unauthenticated |
-| `messaging.spec.js` | encrypted button/Enter sends; two-context live chat and fragment key recovery; Unicode/newlines/links; actual WS frames and Redis contain ciphertext only; ordered rapid sends, paged history and reconnect dedup; wrong-key/tampered/malformed messages have visible error rows and later valid messages survive; plaintext clients rejected; UTF-8 limits and quota reservations |
-| `files.spec.js` | file display/size, multifile upload, red admission/stream/network errors without unrelated transport advice, retry state, missing streaming APIs, cleanup errors, authenticated disk-backed download and picker user activation |
-| `sharing.spec.js` | Share copies a short-passcode fragment invite and shows a QR; fresh-browser access recovers encryption keys |
-| `encryption.spec.js` | actual h2; ciphertext-only file storage/metadata; empty/boundary/multichunk round trips; wrong keys, corruption, truncation, reordering/trailing data; rejection of multipart clients; token-only auth without protocol negotiation; no Blob fallback; UI upload/download cancellation; measured 64 MiB backpressure and a completed exact-byte 32 MiB disk round trip |
-
-The native OS file picker is not automated by Playwright. Its function is
-substituted with a real Origin Private File System file handle. The production
-download click handler still runs (and is checked for user activation), calls
-`createWritable()`, and decrypts through the same code into a real
-`FileSystemWritableFileStream`. Tests verify destination bytes and that a failed
-or canceled download preserves an existing destination. This is **not** a test
-of the native picker UI, nor a mock/in-memory destination.
-
-Buffer measurements instrument plaintext/record/parser sizes and network
-read-ahead under a throttled real HTTP2 connection. They demonstrate early
-server writes and backpressure; they do **not** measure whole-browser RSS.
-
-Deliberately not covered: drag-and-drop upload (a secondary entry point that is
-awkward to simulate reliably in Playwright — uploads are tested via the file
-input) and Windows (the launcher is POSIX-only; the app is deployed on Linux).
-
-## How it works
-
-A run is **fully isolated** and touches none of your dev/prod data:
-
-1. `server.mjs` (started by Playwright's `webServer`) boots loopback-only Redis
-   on `6390` without persistence and a backend on `8091` in `ENV=E2E`. Its
-   upload/log directory is unique under the worktree's `.cache/e2e-*`; the E2E
-   quota is 96 MiB. It refuses to reuse occupied ports.
-2. The backend serves the freshly built client from `client/dist`, so the tests
-   run against the current UI.
-3. The launcher generates a temporary self-signed certificate with OpenSSL and
-   exposes `https://127.0.0.1:8443` using Node's HTTP2 TLS server. HTTP1 upgrade
-   forwarding supports WebSocket. Playwright accepts the certificate only in its
-   test context; no machine trust store is changed.
-4. On teardown the launcher signals and waits for its own child processes,
-   escalating if necessary, and removes only its generated directory.
-
-`SNAPFILE_E2E=1` adds an extra built test-harness page that imports the same
-streaming crypto module for instrumentation. Ordinary production builds do not
-include that page. Test-only throttling lives in the local proxy, not the backend.
-The E2E config hardcodes the 96 MiB quota and leaves `USE_X_ACCEL_REDIRECT=False`:
-the Node proxy does not implement NGINX internal redirects. Private ports and
-temporary paths are passed as arguments to `server/tests/run_server.py`, which
-overrides those settings only inside its test process. These browser tests exercise
-the aiohttp ciphertext-download fallback, not native NGINX offload. The backend
-suite checks both flag settings and runs an isolated NGINX round trip when the
-`nginx` executable is available (otherwise that integration test is skipped).
-
-## Prerequisites
-
-- Node.js 20+ and `npm install` (installs `@playwright/test`).
-- OpenSSL for temporary local certificates.
-- The Chromium browser for Playwright — install once:
-  ```sh
-  npx playwright install chromium
-  ```
-- `redis-server` on your `PATH` (e.g. `brew install redis`). No running Redis
-  instance is required — the suite starts its own. `redis-cli` (included with
-  Redis) inspects and corrupts only that isolated instance in chat tests.
-- The Python backend installed (`cd server && pip install -e .`) so
-  `python -m snapfile` is importable.
-
-## Running
-
-From the `client/` directory:
+Complete the [project setup](../../../README.md#install--run) first. On macOS/Linux,
+ensure `redis-server`, `redis-cli` and OpenSSL are on `PATH`. From `client/`:
 
 ```sh
-npm run test:e2e          # build the client, then run all tests (headless)
-npm run test:e2e:headed   # ...with a visible browser
-npm run test:e2e:ui       # ...in Playwright's interactive UI mode
-npm run test:e2e:report   # open the HTML report from the last run
+npx playwright install chromium       # one-time browser installation
+npm run test:e2e                      # builds current sources, then runs headless
+npm run test:e2e:headed                # same suite in a visible browser
+npm run test:e2e:ui                    # interactive Playwright UI
+npm run test:e2e -- files.spec.js -g "download"  # build and run a selected test
+npm run build                        # restore production assets after tests
 ```
 
-To run a single spec or filter by title:
+The test build includes an instrumentation page; ordinary builds exclude it.
+For direct `npx playwright test` runs, first build with `SNAPFILE_E2E=1 npm run build`.
+
+## Manual testing
+
+From `client/`, without starting automated tests:
 
 ```sh
-npx playwright test files.spec.js
-npx playwright test -g "download"
+npm run build
+node tests/e2e/server.mjs
 ```
 
-> `npm run test:e2e` rebuilds the client first so the tests always run against
-> your latest source. If you run `npx playwright test` directly, build the
-> client yourself (`SNAPFILE_E2E=1 npm run build`) beforehand.
+Open `https://127.0.0.1:8443/login.html` in desktop Chrome/Chromium or Edge.
+The temporary certificate is self-signed; accept it only for local testing, not
+in the system trust store. The native save picker remains available. Ctrl-C stops
+the server and discards its test data.
 
-## Headless vs. watching the browser
+## Isolation and configuration
 
-The browser is **headless by default** — `npm run test:e2e` runs `playwright
-test`, which shows no window. To watch it run:
+The launcher starts nonpersistent Redis on `6390`, aiohttp on `8091` and TLS/H2
+on `8443`. Uploads/logs/certificates live in a unique `.cache/e2e-*` directory;
+the runtime manifest is `.cache/e2e-<HTTPS port>.json`. Teardown removes only
+that run's resources. The E2E folder quota is 96 MiB, including encryption
+overhead, chat and reservations (normal default: 1 GB).
 
-```sh
-npm run test:e2e:headed   # visible Chromium window, tests run one at a time
-npm run test:e2e:ui       # Playwright UI mode — watch, time-travel, re-run individual tests
-```
+`E2E_PORT`, `E2E_REDIS_PORT` and `E2E_HTTPS_PORT` select alternative ports;
+use distinct ports while a manual instance is running. `E2E_PYTHON` selects the
+interpreter (otherwise `.venv/bin/python`, then `python`/`python3`).
 
-Or ad hoc: `npx playwright test --headed` (add `--debug` for the step-through
-inspector, or `-g "download"` to focus a single test). After any run,
-`npm run test:e2e:report` opens the HTML report with traces/videos for failures.
+The launcher runs `python -m snapfile` with `ENV=E2E`. `config.py` accepts
+`SNAPFILE_PORT`, `REDIS_ADDRESS`, `SNAPFILE_UPLOAD` and `SNAPFILE_LOG` overrides
+only in TEST/E2E. Those sections also accept `SNAPFILE_USE_X_ACCEL_REDIRECT=0|1`
+for offload tests; the browser launcher always sets `0`. DEV/PROD are unaffected.
 
-## Tuning
+## Coverage boundaries
 
-- `E2E_PORT` / `E2E_REDIS_PORT` / `E2E_HTTPS_PORT` change the backend / Redis /
-  browser-facing TLS ports. Each launch publishes its private runtime in
-  `.cache/e2e-<HTTPS port>.json`, so runs on different ports cannot inspect or
-  modify each other's Redis/files. Use different ports for automated tests while
-  a manual instance is running; never reuse the manual instance for tests.
-- `E2E_PYTHON` selects the Python interpreter the launcher uses (defaults to
-  the worktree's `.venv/bin/python` when present, then `python`/`python3`).
-
-The backend API suite now starts its own private Redis too; do not run any
-production nginx tests as part of local validation. Pure crypto tests are
-`npm run test:crypto`.
-
-The E2E quota is intentionally 96 MiB per folder, not the default/production
-1 GB (1,000,000,000 bytes). Encrypted file overhead, metadata, chat and pending
-uploads all count against it. A storage rejection is not a browser or HTTP2
-compatibility error. After automated tests, `npm run build` restores ordinary
-production assets without the instrumentation page. A manual instance sharing
-this checkout sees frontend changes on the user's next refresh; its backend
-and private data do not need a restart for frontend-only changes.
+- Tests assert secure context and actual `h2`; they do not bypass streaming
+  transport requirements or change system certificate trust.
+- Automated downloads substitute the native picker with an OPFS handle, but
+  use real disk-backed `FileSystemWritableFileStream` writes. They test bytes and
+  failure/cancellation safety, not the native picker dialog or drag-and-drop UI.
+- The Node proxy exercises aiohttp downloads, not NGINX X-Accel. The backend
+  suite has an optional native NGINX test, skipped when NGINX is unavailable.
+- Buffer/backpressure checks measure the stream pipeline, not whole-browser RSS.
