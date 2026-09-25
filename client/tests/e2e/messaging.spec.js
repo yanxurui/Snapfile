@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { createFolder, openFolder, sendMessage, messageRow, waitForReady } from './helpers.js';
 
 async function redis(...command) {
-  const runtime = JSON.parse(await readFile(resolve('../.cache/e2e-current.json'), 'utf8'));
+  const runtime = JSON.parse(await readFile(resolve(`../.cache/e2e-${process.env.E2E_HTTPS_PORT || '8443'}.json`), 'utf8'));
   return execFileSync('redis-cli', ['-h', '127.0.0.1', '-p', runtime.redisPort, '-n', '15',
     '--raw', ...command], { encoding: 'utf8' }).trim();
 }

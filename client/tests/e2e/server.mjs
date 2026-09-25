@@ -32,7 +32,7 @@ const HTTPS_PORT = process.env.E2E_HTTPS_PORT || '8443';
 const testRoot = resolve(repoRoot, '.cache');
 mkdirSync(testRoot, { recursive: true });
 const runDirectory = mkdtempSync(resolve(testRoot, 'e2e-'));
-const runtimePath = resolve(testRoot, 'e2e-current.json');
+const runtimePath = resolve(testRoot, `e2e-${HTTPS_PORT}.json`);
 let proxy;
 
 // Pick a working interpreter: honor E2E_PYTHON, else prefer `python`, then

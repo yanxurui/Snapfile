@@ -30,7 +30,13 @@
         <button class="left" id="cancel" type="button" v-if="uploading" @click="cancelUpload">
           Cancel
         </button>
-        <span class="percent">{{ percentText }}</span>
+        <span
+          class="percent"
+          :class="{ 'upload-error': uploadError }"
+          :role="uploadError ? 'alert' : undefined"
+          aria-live="polite"
+          aria-atomic="true"
+        >{{ percentText }}</span>
         <button
           class="right"
           id="send_message"
@@ -186,6 +192,7 @@ const fileInput = ref(null);
 
 const uploading = ref(false);
 const percentText = ref('');
+const uploadError = ref(false);
 let fileKey;
 let chatKey;
 let messageQueue = Promise.resolve();
@@ -410,26 +417,51 @@ function cancelUpload() {
 
 async function checked(response) {
   if (response.ok) return response;
-  if (response.status === 431) throw new Error('Storage space not enough');
   throw new Error((await response.text()) || `Request failed (${response.status})`);
+}
+
+function checkUploadSupport() {
+  if (!window.isSecureContext) {
+    throw new Error('Encrypted uploads require a secure context. Open Snapfile over HTTPS.');
+  }
+  const unsupported = 'This browser does not support streaming uploads. Use current desktop Chrome or Edge.';
+  if (typeof ReadableStream !== 'function' || typeof Request !== 'function') {
+    throw new Error(unsupported);
+  }
+  // Browsers that stringify stream bodies do not support streaming requests.
+  let duplexRead = false;
+  let request;
+  try {
+    request = new Request(location.href, {
+      method: 'POST',
+      body: new ReadableStream({ start(controller) { controller.close(); } }),
+      get duplex() { duplexRead = true; return 'half'; }
+    });
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    throw new Error(unsupported, { cause: error });
+  }
+  if (!duplexRead || request.headers.has('Content-Type')) throw new Error(unsupported);
 }
 
 async function uploadFiles(files) {
   if (uploading.value || !files.length) return;
-  if (!window.isSecureContext) {
-    percentText.value = 'Error: Encrypted uploads require HTTPS and HTTP/2 in desktop Chrome or Edge';
-    return;
-  }
+  uploadError.value = false;
+  percentText.value = 'Preparing upload...';
   uploading.value = true;
   uploadController = new AbortController();
   const { signal } = uploadController;
   let count = 0;
+  let stage = 'checking browser support';
+  let cleanupMessage = '';
   try {
+    checkUploadSupport();
     for (const file of Array.from(files)) {
       signal.throwIfAborted();
       let token;
       let encrypted;
       try {
+        stage = 'preparing file';
         encrypted = await encryptFile(file, fileKey, {
           onProgress: (produced) => {
             const percentage = file.size ? Math.floor(100 * produced / file.size) : 100;
@@ -437,11 +469,18 @@ async function uploadFiles(files) {
           }
         });
         // Finish admission before streaming; the fetch upload response is half-duplex.
+        stage = 'reserving space';
         const admission = await checked(await fetch('/files', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ size: encrypted.size, metadata: encrypted.metadata }), signal
         }));
         ({ token } = await admission.json());
+        stage = 'sending file';
+        const protocol = performance.getEntriesByName(admission.url).at(-1)?.nextHopProtocol ||
+          performance.getEntriesByType('navigation')[0]?.nextHopProtocol;
+        if (protocol === 'http/1.1' || protocol === 'http/1.0') {
+          throw new Error('This connection uses HTTP/1. Streaming uploads require HTTP/2 or HTTP/3 over HTTPS.');
+        }
         await checked(await fetch(`/files/${token}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' },
           body: encrypted.body, duplex: 'half', signal
@@ -450,15 +489,23 @@ async function uploadFiles(files) {
         count += 1;
       } finally {
         encrypted?.dispose();
-        if (token) await checked(await fetch(`/files/${token}`, { method: 'DELETE' }));
+        if (token) {
+          try {
+            await checked(await fetch(`/files/${token}`, { method: 'DELETE' }));
+          } catch (error) {
+            console.error('Failed to release upload reservation', error);
+            cleanupMessage = ` Could not confirm upload cleanup: ${error.message}.`;
+          }
+        }
       }
     }
     percentText.value = `Success: ${count} file(s) uploaded (server confirmed)`;
     showToast('Upload complete');
   } catch (error) {
     console.error(error);
-    percentText.value = signal.aborted ? `Canceled (${count} completed)` :
-      `Error: ${error.message}. Streaming uploads require HTTPS/HTTP2 and desktop Chrome or Edge.`;
+    uploadError.value = !signal.aborted || !!cleanupMessage;
+    percentText.value = (signal.aborted ? `Canceled (${count} completed)` :
+      `Upload failed (${stage}): ${error.message}`) + cleanupMessage;
   } finally {
     uploading.value = false;
     uploadController = null;
@@ -608,6 +655,12 @@ async function handleLogout() {
   text-overflow: ellipsis;
   white-space: nowrap;
   overflow: hidden;
+}
+
+.inputAddon .upload-error {
+  color: #b00020;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 textarea {

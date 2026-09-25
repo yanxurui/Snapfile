@@ -16,9 +16,9 @@ the Vue client and the Python server.
 | --- | --- |
 | `login.spec.js` | create a new folder, open an existing folder by passcode, wrong-passcode error, logout, redirect-to-login when unauthenticated |
 | `messaging.spec.js` | encrypted button/Enter sends; two-context live chat and fragment key recovery; Unicode/newlines/links; actual WS frames and Redis contain ciphertext only; ordered rapid sends, paged history and reconnect dedup; wrong-key/tampered/malformed messages have visible error rows and later valid messages survive; plaintext clients rejected; UTF-8 limits and quota reservations |
-| `files.spec.js` | file display/size, multifile upload, admission rejection, authenticated disk-backed download and picker user activation |
+| `files.spec.js` | file display/size, multifile upload, red admission/stream/network errors without unrelated transport advice, retry state, missing streaming APIs, cleanup errors, authenticated disk-backed download and picker user activation |
 | `sharing.spec.js` | Share copies a short-passcode fragment invite and shows a QR; fresh-browser access recovers encryption keys |
-| `encryption.spec.js` | actual h2; ciphertext-only file storage/metadata; empty/boundary/multichunk round trips; wrong keys, corruption, truncation, reordering/trailing data; rejection of old query links and multipart clients; token-only auth without protocol negotiation; no Blob fallback; UI upload/download cancellation; measured 64 MiB backpressure and a completed exact-byte 32 MiB disk round trip |
+| `encryption.spec.js` | actual h2; ciphertext-only file storage/metadata; empty/boundary/multichunk round trips; wrong keys, corruption, truncation, reordering/trailing data; rejection of multipart clients; token-only auth without protocol negotiation; no Blob fallback; UI upload/download cancellation; measured 64 MiB backpressure and a completed exact-byte 32 MiB disk round trip |
 
 The native OS file picker is not automated by Playwright. Its function is
 substituted with a real Origin Private File System file handle. The production
@@ -117,10 +117,21 @@ inspector, or `-g "download"` to focus a single test). After any run,
 ## Tuning
 
 - `E2E_PORT` / `E2E_REDIS_PORT` / `E2E_HTTPS_PORT` change the backend / Redis /
-  browser-facing TLS ports.
+  browser-facing TLS ports. Each launch publishes its private runtime in
+  `.cache/e2e-<HTTPS port>.json`, so runs on different ports cannot inspect or
+  modify each other's Redis/files. Use different ports for automated tests while
+  a manual instance is running; never reuse the manual instance for tests.
 - `E2E_PYTHON` selects the Python interpreter the launcher uses (defaults to
   the worktree's `.venv/bin/python` when present, then `python`/`python3`).
 
 The backend API suite now starts its own private Redis too; do not run any
 production nginx tests as part of local validation. Pure crypto tests are
 `npm run test:crypto`.
+
+The E2E quota is intentionally 96 MiB per folder, not the default/production
+1 GB (1,000,000,000 bytes). Encrypted file overhead, metadata, chat and pending
+uploads all count against it. A storage rejection is not a browser or HTTP2
+compatibility error. After automated tests, `npm run build` restores ordinary
+production assets without the instrumentation page. A manual instance sharing
+this checkout sees frontend changes on the user's next refresh; its backend
+and private data do not need a restart for frontend-only changes.

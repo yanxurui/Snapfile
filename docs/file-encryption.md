@@ -25,7 +25,7 @@ file or chat keys directly from that token, but it **can guess short passcodes o
 The KDF does not turn a six-character code into a high-entropy secret.
 
 Share links put the same passcode in `#identity=...`, never in a query.
-Old `?identity=...` links show an unsupported-link error and do not submit a login.
+The login page reads only fragment invites, with no special handling for old links.
 Authentication failures never send the raw passcode as a fallback. Local storage
 retains only the passcode; it does not select an application protocol.
 
@@ -124,6 +124,15 @@ most 1 MiB is read only when fetch requests the next record. Ciphertext records
 are sent directly through same-origin fetch with `duplex: 'half'`. Sequential
 multifile upload bounds the number of active crypto streams. The UI's encryption
 percentage is not a claim about server-received bytes.
+
+Upload errors are shown in red with their stage (browser support, preparation,
+quota admission or streaming). Server rejections retain their specific message;
+a quota or disk error does not imply a transport problem. Browser guidance is
+shown only when streaming APIs are missing or a secure context is unavailable,
+and HTTP2/HTTP3 guidance only when HTTP1 is observed. Generic fetch failures do
+not identify an HTTP version. Failed cleanup is reported separately without
+replacing the original upload error. Retrying clears the error state, and normal
+progress, success and cancellation are not styled as errors.
 
 Download calls `showSaveFilePicker` directly in the click handler, before a
 network await, then writes authenticated records to `createWritable()`. Each

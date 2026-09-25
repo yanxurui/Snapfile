@@ -131,11 +131,6 @@ async function createFolder() {
 // Lifecycle Hooks
 // ---------------------------------------------------------------------------
 onMounted(() => {
-  if (new URLSearchParams(window.location.search).has('identity')) {
-    history.replaceState(null, '', window.location.pathname);
-    error.value = 'Old query share links are no longer supported. Create a new folder or use a fragment share link.';
-    return;
-  }
   const fragment = new URLSearchParams(window.location.hash.slice(1));
   if (fragment.has('identity')) {
     const shared = fragment.get('identity');

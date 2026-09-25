@@ -1,7 +1,6 @@
 <template>
   <p id="status_bar" :style="{ opacity: visible ? 1 : 0 }">
     <span>{{ info.identity }}</span>
-    <span>Files and chat end-to-end encrypted</span>
     <span>expires at {{ formattedExpire }}</span>
     <span>{{ info.usage_percentage }} of {{ info.storage_limit }} used</span>
   </p>

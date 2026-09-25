@@ -4,7 +4,7 @@ import { resolve, join } from 'node:path';
 import { createFolder, uploadFile, messageRow, waitForReady, installDiskPicker, diskBytes } from './helpers.js';
 
 async function storedFiles() {
-  const runtime = JSON.parse(await readFile(resolve('../.cache/e2e-current.json'), 'utf8'));
+  const runtime = JSON.parse(await readFile(resolve(`../.cache/e2e-${process.env.E2E_HTTPS_PORT || '8443'}.json`), 'utf8'));
   const root = join(runtime.directory, 'uploads');
   const names = await readdir(root, { recursive: true });
   const files = [];
@@ -87,16 +87,6 @@ test('failed login sends only the authentication token without protocol negotiat
   expect(new URLSearchParams(requests[0]).get('identity')).toMatch(/^[0-9a-f]{64}$/);
   expect(new URLSearchParams(requests[0]).has('protocol')).toBe(false);
   expect(requests[0]).not.toContain('never-send-this-code');
-});
-
-test('old query links fail visibly without authenticating or offering legacy mode', async ({ page }) => {
-  const posts = [];
-  page.on('request', request => { if (request.method() === 'POST') posts.push(request); });
-  await page.goto('/login.html?identity=old-code');
-  await expect(page.locator('.error')).toContainText('no longer supported');
-  await expect(page.getByRole('checkbox')).toHaveCount(0);
-  expect(posts).toHaveLength(0);
-  expect(new URL(page.url()).search).toBe('');
 });
 
 test('stale multipart clients cannot store plaintext files', async ({ page }) => {
@@ -190,10 +180,14 @@ test('Cancel upload removes partial ciphertext and allows a new upload', async (
   }).toBeGreaterThan(0);
   await page.locator('#cancel').click();
   await expect(page.locator('.percent')).toContainText('Canceled');
+  await expect(page.locator('.percent')).not.toHaveClass(/upload-error/);
+  await expect(page.locator('.percent')).not.toHaveCSS('color', 'rgb(176, 0, 32)');
   await expect.poll(async () => (await storedFiles()).filter(file => !before.has(file)).length).toBe(0);
   await expect(messageRow(page, 'cancel-upload.bin')).toHaveCount(0);
   await uploadFile(page, 'after-cancel.txt', 'retry works');
   await expect(messageRow(page, 'after-cancel.txt')).toBeVisible();
+  await expect(page.locator('.percent')).toContainText('Success');
+  await expect(page.locator('.percent')).not.toHaveClass(/upload-error/);
 });
 
 test('64 MiB streaming reaches disk early, obeys network backpressure and cancels cleanly', async ({ page }) => {
@@ -316,7 +310,9 @@ test('HTTP1-only localhost fails visibly without falling back to a buffered uplo
   await page.getByRole('button', { name: 'Create A New Folder' }).click();
   await waitForReady(page);
   await uploadFile(page, 'http1.bin', 'should not upload');
-  await expect(page.locator('.percent')).toContainText('HTTP2');
+  await expect(page.locator('.percent')).toContainText('This connection uses HTTP/1');
+  await expect(page.locator('.percent')).toContainText('HTTP/2 or HTTP/3');
+  await expect(page.locator('.percent')).toHaveClass(/upload-error/);
   await expect(messageRow(page, 'http1.bin')).toHaveCount(0);
 });
 
