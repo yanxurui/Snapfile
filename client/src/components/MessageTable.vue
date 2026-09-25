@@ -1,7 +1,7 @@
 <template>
   <table>
     <tbody>
-      <tr v-for="message in messages" :key="message.date + message.data">
+      <tr v-for="message in messages" :key="message.id" :class="{ 'decrypt-error': message.decryptError }">
         <td :colspan="message.type === 0 ? 2 : 1">
           <template v-if="message.type === 0">
             <a v-if="isUrl(message.data)" :href="message.data" target="_blank" rel="noreferrer">
@@ -10,7 +10,8 @@
             <span v-else>{{ message.data }}</span>
           </template>
           <template v-else>
-            <a :href="buildFileUrl(message)" target="_blank" rel="noreferrer">
+            <span v-if="message.decryptError">{{ message.data }}</span>
+            <a v-else href="#" @click.prevent="$emit('download', message)">
               {{ message.data }}
             </a>
           </template>
@@ -30,6 +31,7 @@ const props = defineProps({
     default: () => []
   }
 });
+defineEmits(['download']);
 
 const urlRegex = /^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)$/i;
 
@@ -46,16 +48,6 @@ function isUrl(value) {
   return urlRegex.test(value);
 }
 
-function buildFileUrl(message) {
-  if (!message.file_id) {
-    return '#';
-  }
-  const params = new URLSearchParams({
-    id: message.file_id,
-    name: message.data
-  });
-  return `/files?${params.toString()}`;
-}
 </script>
 
 <style scoped>
@@ -86,5 +78,9 @@ td:last-child {
 
 td.right {
   text-align: right;
+}
+
+.decrypt-error {
+  color: #b00020;
 }
 </style>

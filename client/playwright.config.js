@@ -4,7 +4,8 @@ import { dirname, resolve } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.E2E_PORT || '8091';
-const baseURL = `http://127.0.0.1:${PORT}`;
+const HTTPS_PORT = process.env.E2E_HTTPS_PORT || '8443';
+const baseURL = `https://127.0.0.1:${HTTPS_PORT}`;
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -19,6 +20,7 @@ export default defineConfig({
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL,
+    ignoreHTTPSErrors: true,
     acceptDownloads: true,
     trace: 'on-first-retry',
     video: 'retain-on-failure',
@@ -31,10 +33,12 @@ export default defineConfig({
   webServer: {
     command: `node ${resolve(here, 'tests', 'e2e', 'server.mjs')}`,
     url: baseURL,
+    ignoreHTTPSErrors: true,
     timeout: 60_000,
     reuseExistingServer: false,
+    gracefulShutdown: { signal: 'SIGTERM', timeout: 10000 },
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { E2E_PORT: String(PORT) },
+    env: { E2E_PORT: String(PORT), E2E_HTTPS_PORT: String(HTTPS_PORT) },
   },
 });

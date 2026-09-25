@@ -33,6 +33,7 @@
 
 <script setup>
 import { onMounted, ref } from 'vue';
+import { credentials, randomPasscode } from '@/crypto.js';
 
 // ---------------------------------------------------------------------------
 // Constants & Configuration
@@ -48,19 +49,6 @@ const passcode = ref('');
 const submitting = ref(false);
 const creating = ref(false);
 const error = ref('');
-
-// ---------------------------------------------------------------------------
-// Utility Functions
-// ---------------------------------------------------------------------------
-function sha256(input) {
-  // Placeholder for real hash if needed
-  return input;
-}
-
-function genRandomCode() {
-  return Math.random().toString(36).substring(2, 8);
-}
-
 // ---------------------------------------------------------------------------
 // API Functions
 // ---------------------------------------------------------------------------
@@ -71,7 +59,8 @@ async function login(identity) {
     body: new URLSearchParams({ identity })
   });
   if (!response.ok) {
-    throw new Error('Login failed');
+    throw new Error(response.status === 401 ? 'Wrong passcode or expired!' :
+      (await response.text()) || 'Login failed');
   }
 }
 
@@ -95,13 +84,13 @@ async function handleLoginWithPasscode(raw) {
   error.value = '';
   
   try {
-    const normalized = raw.trim();
-    await login(sha256(normalized.toLowerCase()));
+    const normalized = raw.trim().toLowerCase();
+    await login((await credentials(normalized)).auth);
     localStorage.setItem('identity', normalized);
     window.location.href = '/';
   } catch (err) {
     console.error(err);
-    error.value = 'Wrong passcode or expired!';
+    error.value = err.message || 'Login failed';
   } finally {
     submitting.value = false;
   }
@@ -120,9 +109,9 @@ async function createFolder() {
   
   let attempts = 5;
   while (attempts > 0) {
-    const candidate = genRandomCode();
     try {
-      await signup(sha256(candidate.toLowerCase()));
+      const candidate = await randomPasscode();
+      await signup((await credentials(candidate)).auth);
       localStorage.setItem('identity', candidate);
       window.location.href = '/';
       return;
@@ -142,10 +131,11 @@ async function createFolder() {
 // Lifecycle Hooks
 // ---------------------------------------------------------------------------
 onMounted(() => {
-  const params = new URLSearchParams(window.location.search);
-  const sharedIdentity = params.get('identity');
-  if (sharedIdentity) {
-    handleLoginWithPasscode(sharedIdentity);
+  const fragment = new URLSearchParams(window.location.hash.slice(1));
+  if (fragment.has('identity')) {
+    const shared = fragment.get('identity');
+    history.replaceState(null, '', window.location.pathname);
+    handleLoginWithPasscode(shared);
   }
 });
 </script>

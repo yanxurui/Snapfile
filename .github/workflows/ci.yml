@@ -17,15 +17,6 @@ jobs:
   backend-tests:
     name: Backend unit tests
     runs-on: ubuntu-latest
-    services:
-      redis:
-        image: redis:7
-        ports: ['6379:6379']
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,6 +27,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ./server
           pip install requests websocket-client
+      - name: Install isolated test Redis
+        run: sudo apt-get update && sudo apt-get install -y redis-server
       - name: Run unit tests
         working-directory: server/tests
         run: python -m unittest -v test_api.py
@@ -65,7 +58,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Run E2E suite (builds client, then runs Playwright)
         working-directory: client
-        run: npm run test:e2e
+        run: npm run test:crypto && npm run test:e2e
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4

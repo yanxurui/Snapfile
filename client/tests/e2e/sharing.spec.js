@@ -19,7 +19,7 @@ test.describe('sharing', () => {
 
     // The copied link points back at this folder.
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
-    expect(clipboard).toContain(`/login.html?identity=${passcode}`);
+    expect(clipboard).toContain(`/login.html#identity=${passcode}`);
 
     // Clicking the backdrop closes the modal.
     await qr.click({ position: { x: 5, y: 5 } });
@@ -38,7 +38,7 @@ test.describe('sharing', () => {
     // A guest who just opens the invite URL is logged straight into the folder.
     const guest = await browser.newContext();
     const guestPage = await guest.newPage();
-    await guestPage.goto(`/login.html?identity=${passcode}`);
+    await guestPage.goto(`/login.html#identity=${passcode}`);
     await waitForReady(guestPage);
     await expect(messageRow(guestPage, 'shared via invite link')).toBeVisible();
     await guest.close();

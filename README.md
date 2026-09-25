@@ -11,6 +11,12 @@ An anonymous file transfer application that enables you to access files from any
     * expires automatically after one day
 
 
+## TODO
+
+* [ ] Design high-entropy, browser-generated sharing secrets with fragment links,
+  a copyable recovery code and clear key-retention/recovery behavior. Document
+  access/key-format changes and keep encryption keys out of server requests.
+
 ## Install & Run
 
 ### Project layout
@@ -28,7 +34,7 @@ Prerequisites
 
 * Python 3.12 (pyenv recommended)
 * Redis
-* Node.js 18+ (for the Vue-based client build)
+* Node.js 20+ (for the Vue-based client build)
 
 ```sh
 # 1. download source code
@@ -53,7 +59,7 @@ snapfile
 
 some default configuration
 * PORT: The server will listen to port 8090
-* LOG_FILE: Logs are output to `test.log` in the current workding directory (i.e., CWD)
+* LOG_FILE: Logs are output to the console by default
 * UPLOAD_ROOT_DIRECTORY: Files are stored in `./upload` in CWD
 
 ### Deploy in production mode (CentOS)
@@ -122,6 +128,10 @@ It supports websocket (long connection) which allows to implement the instant me
 3. prevent from brute force attack
 4. sharing port 443 with other services and forwarding to the backend (python web app in our case)
 
+Streaming uploads need browser-facing HTTPS with HTTP/2 or HTTP/3.
+`ENV=PROD` enables `USE_X_ACCEL_REDIRECT`; disable it when not using NGINX.
+See [browser encryption and download offload](docs/file-encryption.md).
+
 ### Redis
 keys:
 
@@ -149,6 +159,9 @@ npm run build
 npm run preview
 ```
 
+For manual file-transfer testing, use the [local TLS/H2 launcher](client/tests/e2e/README.md#manual-testing)
+instead of the HTTP/1 dev server.
+
 ### Supervisord
 manage the lifecycle of the service
 To restart the service, run the command below as root:
@@ -160,7 +173,7 @@ supervisorctl restart snapfile
 
 GitHub Actions automate testing, building and release packaging:
 
-* `.github/workflows/ci.yml` — runs the backend unit tests, the Playwright E2E
+* `.github/workflows/ci.yml` — runs the backend unit tests, crypto tests, the Playwright E2E
   suite and a client build on every pull request to `master` and every push to
   `master`. `master` is protected so changes land via PR.
 * `.github/workflows/release.yml` — when you push a `v*` tag (or run it
@@ -176,13 +189,13 @@ need to install packages: websocket-client
 Functional test for APIs of python backend:
 using the classical python unittest
 ```sh
-cd tests
+cd server/tests
 python -m unittest -v test_api.py
 ```
 
-* use a separate port 8090
-* select db 0 of Redis
-* clean all data at startup
+* use available private loopback ports
+* start an isolated, non-persistent Redis instance (db 0)
+* clean up only this run's temporary files and processes
 
 some known issues:
 
@@ -214,7 +227,7 @@ stress test for aiohttp.
 
 #### End-to-end tests (Playwright)
 Browser-level tests that drive the built Vue client against the real backend
-(HTTP + WebSocket + Redis), covering creating/opening a folder, sending
+(HTTPS/HTTP2 + WebSocket + Redis), covering creating/opening a folder, sending
 messages, uploading and downloading files, real-time sync and sharing.
 
 ```sh
@@ -222,8 +235,9 @@ cd client
 npm install
 npx playwright install chromium   # one-time browser download
 npm run test:e2e                  # builds the client, then runs the suite
+npm run test:crypto               # crypto unit tests
 ```
 
 Each run starts its own isolated, in-memory Redis and backend (`ENV=E2E`), so it
 never touches your dev/prod data. `redis-server` must be on your `PATH`. See
-`client/tests/e2e/README.md` for details.
+[client/tests/e2e/README.md](client/tests/e2e/README.md) for details.
