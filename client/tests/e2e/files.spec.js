@@ -150,7 +150,7 @@ test.describe('files', () => {
     expect(admissions).toHaveLength(0);
   });
 
-  for (const missing of ['ReadableStream', 'streaming Request', 'secure context']) {
+  for (const missing of ['ReadableStream', 'Web Crypto', 'secure context']) {
     test(`missing ${missing} gives capability guidance before admission`, async ({ page }) => {
       await createFolder(page);
       const admissions = [];
@@ -162,20 +162,13 @@ test.describe('files', () => {
           Object.defineProperty(window, 'isSecureContext', { value: false });
         } else if (missing === 'ReadableStream') {
           window.ReadableStream = undefined;
-        } else {
-          const NativeRequest = window.Request;
-          window.Request = class extends NativeRequest {
-            constructor(url, init) {
-              super(url, { method: init.method, body: String(init.body) });
-            }
-          };
-        }
+        } else Object.defineProperty(crypto, 'subtle', { value: undefined });
       }, missing);
-      await uploadFile(page, 'unsupported.txt', 'no buffering fallback');
+      await uploadFile(page, 'unsupported.txt', 'missing required encryption capability');
       const status = page.locator('.percent');
       await expect(status).toContainText('Upload failed (checking browser support)');
       await expect(status).toContainText(missing === 'secure context' ? 'Open Snapfile over HTTPS' :
-        'This browser does not support streaming uploads. Use current desktop Chrome or Edge.');
+        missing === 'Web Crypto' ? 'Web Crypto support' : 'Streams API required');
       await expect(status).toHaveCSS('color', 'rgb(176, 0, 32)');
       await expect(page.locator('#upload_files')).toBeEnabled();
       expect(admissions).toHaveLength(0);
@@ -199,14 +192,6 @@ test.describe('files', () => {
     await expect(page.getByRole('status')).toContainText('authenticated download complete');
     expect(await page.evaluate(() => window.pickerHadActivation)).toBe(true);
     expect(await diskBytes(page, 'empty.bin')).toEqual([]);
-  });
-
-  test('missing disk API gives an explicit error instead of buffering a Blob', async ({ page }) => {
-    await page.addInitScript(() => { window.showSaveFilePicker = undefined; });
-    await createFolder(page);
-    await uploadFile(page, 'no-fallback.bin', 'abc');
-    await messageRow(page, 'no-fallback.bin').locator('a').click();
-    await expect(page.getByRole('status')).toContainText('No in-memory fallback');
   });
 
   test('canceling an active UI download aborts without replacing the destination', async ({ page }) => {

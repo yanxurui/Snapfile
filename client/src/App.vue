@@ -8,7 +8,7 @@
   >
     <div id="top">
       <StatusBar v-if="statusInfo" :info="statusInfo" :visible="!!statusInfo" />
-      <p v-else :role="initializationError ? 'alert' : 'status'" :class="{ 'initialization-error': initializationError }">
+      <p v-else :role="initializationError ? 'alert' : 'status'" :class="{ 'message-error': initializationError }">
         {{ initializationError || 'Opening encrypted folder...' }}
       </p>
       <DropdownMenu v-model:open="menuOpen" @share="handleShare" @logout="handleLogout" />
@@ -55,7 +55,11 @@
         {{ downloadStatus }}
         <button type="button" @click="downloadController?.abort()">Cancel download</button>
       </div>
-      <p v-else-if="downloadStatus" role="status">{{ downloadStatus }}</p>
+      <p v-else-if="downloadStatus" role="status" :class="{ 'message-error': downloadError }">{{ downloadStatus }}</p>
+      <div v-if="readyDownload">
+        <a :href="readyDownload.url" :download="readyDownload.name" @click="onSaveBufferedDownload">Save file</a>
+        <button type="button" @click="discardDownload">Discard download</button>
+      </div>
       <input ref="fileInput" type="file" multiple hidden @change="onFilesSelected" />
     </div>
 
@@ -73,6 +77,7 @@ import PopupToast from '@/components/PopupToast.vue';
 import QrModal from '@/components/QrModal.vue';
 import QRCode from 'qrcode';
 import { credentials, encryptFile, decryptFile, decryptMetadata, encryptChat, decryptChat } from '@/crypto.js';
+import { checkBufferedSize, bufferEncryptedFile, decryptFileToBlob } from '@/transfers.js';
 
 // ---------------------------------------------------------------------------
 // Utility helpers
@@ -206,7 +211,10 @@ let uploadController;
 let downloadController;
 const downloading = ref(false);
 const downloadStatus = ref('');
+const downloadError = ref(false);
+const readyDownload = ref(null);
 const initializationError = ref('');
+let downloadUrlTimer;
 
 const toast = reactive({ visible: false, message: '' });
 const toastTimer = ref(null);
@@ -251,6 +259,7 @@ onBeforeUnmount(() => {
   socket.value?.close();
   uploadController?.abort();
   downloadController?.abort();
+  clearBufferedDownload();
   if (toastTimer.value) {
     clearTimeout(toastTimer.value);
   }
@@ -429,7 +438,8 @@ function checkUploadSupport() {
   if (!window.isSecureContext) {
     throw new Error('Encrypted uploads require a secure context. Open Snapfile over HTTPS.');
   }
-  const unsupported = 'This browser does not support streaming uploads. Use current desktop Chrome or Edge.';
+  if (!crypto.subtle) throw new Error('Encrypted uploads require Web Crypto support.');
+  const unsupported = 'This browser is missing the Streams API required for encrypted transfers.';
   if (typeof ReadableStream !== 'function' || typeof Request !== 'function') {
     throw new Error(unsupported);
   }
@@ -444,9 +454,22 @@ function checkUploadSupport() {
     });
   } catch (error) {
     if (!(error instanceof TypeError)) throw error;
-    throw new Error(unsupported, { cause: error });
+    return false;
   }
-  if (!duplexRead || request.headers.has('Content-Type')) throw new Error(unsupported);
+  return duplexRead && !request.headers.has('Content-Type');
+}
+
+function isHttp1(protocol) {
+  return protocol === 'http/1.1' || protocol === 'http/1.0';
+}
+
+async function reserveUpload(encrypted, signal) {
+  const response = await checked(await fetch('/files', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ size: encrypted.size, metadata: encrypted.metadata }), signal
+  }));
+  const { token } = await response.json();
+  return token;
 }
 
 async function uploadFiles(files) {
@@ -460,40 +483,37 @@ async function uploadFiles(files) {
   let stage = 'checking browser support';
   let cleanupMessage = '';
   try {
-    checkUploadSupport();
+    const streaming = checkUploadSupport() &&
+      !isHttp1(performance.getEntriesByType('navigation')[0]?.nextHopProtocol);
     for (const file of Array.from(files)) {
       signal.throwIfAborted();
       let token;
       let encrypted;
       try {
         stage = 'preparing file';
-        encrypted = await encryptFile(file, fileKey, {
+        if (!streaming) checkBufferedSize(file.size);
+        const options = {
+          signal,
           onProgress: (produced) => {
             const percentage = file.size ? Math.floor(100 * produced / file.size) : 100;
             percentText.value = `Encrypting ${count + 1}/${files.length}: ${percentage}% (not server-confirmed)`;
           }
-        });
+        };
+        encrypted = streaming ? await encryptFile(file, fileKey, options) :
+          await bufferEncryptedFile(file, fileKey, options);
         // Finish admission before streaming; the fetch upload response is half-duplex.
         stage = 'reserving space';
-        const admission = await checked(await fetch('/files', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ size: encrypted.size, metadata: encrypted.metadata }), signal
-        }));
-        ({ token } = await admission.json());
+        token = await reserveUpload(encrypted, signal);
         stage = 'sending file';
-        const protocol = performance.getEntriesByName(admission.url).at(-1)?.nextHopProtocol ||
-          performance.getEntriesByType('navigation')[0]?.nextHopProtocol;
-        if (protocol === 'http/1.1' || protocol === 'http/1.0') {
-          throw new Error('This connection uses HTTP/1. Streaming uploads require HTTP/2 or HTTP/3 over HTTPS.');
-        }
+        if (!streaming) percentText.value = 'Uploading encrypted file (not server-confirmed)...';
         await checked(await fetch(`/files/${token}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' },
-          body: encrypted.body, duplex: 'half', signal
+          body: encrypted.body, ...(streaming ? { duplex: 'half' } : {}), signal
         }));
         token = null;
         count += 1;
       } finally {
-        encrypted?.dispose();
+        encrypted?.dispose?.();
         if (token) {
           try {
             await checked(await fetch(`/files/${token}`, { method: 'DELETE' }));
@@ -519,34 +539,68 @@ async function uploadFiles(files) {
 
 async function downloadEncryptedFile(message) {
   if (downloading.value) return;
-  if (!window.showSaveFilePicker) {
-    downloadStatus.value = 'Saving encrypted files requires desktop Chrome or Edge over HTTPS. No in-memory fallback is used.';
-    return;
-  }
+  clearBufferedDownload();
+  downloadError.value = false;
   downloading.value = true;
   downloadController = new AbortController();
   const { signal } = downloadController;
   let writable;
   let handedOff = false;
   try {
-    // Keep the picker in the click's user activation, before any async operation.
-    const handle = await window.showSaveFilePicker({ suggestedName: message.data });
-    signal.throwIfAborted();
-    writable = await handle.createWritable();
+    const disk = typeof window.showSaveFilePicker === 'function';
+    if (disk) {
+      // Keep the picker in the click's user activation, before any async operation.
+      const handle = await window.showSaveFilePicker({ suggestedName: message.data });
+      signal.throwIfAborted();
+      writable = await handle.createWritable();
+    } else {
+      const meta = await decryptMetadata(message.metadata, fileKey);
+      checkBufferedSize(meta.size);
+      signal.throwIfAborted();
+    }
     downloadStatus.value = 'Downloading and authenticating...';
     const response = await checked(await fetch(`/files?id=${encodeURIComponent(message.file_id)}`, { signal }));
     handedOff = true;
-    await decryptFile(response.body, message.metadata, fileKey, writable, { signal });
-    downloadStatus.value = 'Saved: authenticated download complete';
+    if (disk) {
+      await decryptFile(response.body, message.metadata, fileKey, writable, { signal });
+      downloadStatus.value = 'Saved: authenticated download complete';
+    } else {
+      const { blob, name } = await decryptFileToBlob(response.body, message.metadata, fileKey, { signal });
+      signal.throwIfAborted();
+      readyDownload.value = { url: URL.createObjectURL(blob), name };
+      downloadStatus.value = 'Ready: authenticated download complete. Choose Save file.';
+    }
   } catch (error) {
     if (writable && !handedOff) await writable.abort();
     console.error(error);
-    downloadStatus.value = signal.aborted || error.name === 'AbortError' ? 'Download canceled' :
+    downloadError.value = !signal.aborted && error.name !== 'AbortError';
+    downloadStatus.value = !downloadError.value ? 'Download canceled' :
       `Download failed: ${error.message}. No unauthenticated file was committed.`;
   } finally {
     downloading.value = false;
     downloadController = null;
   }
+}
+
+function clearBufferedDownload() {
+  clearTimeout(downloadUrlTimer);
+  if (readyDownload.value) URL.revokeObjectURL(readyDownload.value.url);
+  readyDownload.value = null;
+}
+
+function discardDownload() {
+  clearBufferedDownload();
+  downloadStatus.value = 'Download discarded';
+}
+
+function onSaveBufferedDownload() {
+  downloadStatus.value = 'Save requested. Your browser handles the download.';
+  // Keep the URL alive while the browser starts consuming the clicked link.
+  clearTimeout(downloadUrlTimer);
+  downloadUrlTimer = setTimeout(() => {
+    clearBufferedDownload();
+    downloadStatus.value = 'Save link expired. Download again if needed.';
+  }, 60_000);
 }
 
 // ---------------------------------------------------------------------------
@@ -608,6 +662,9 @@ async function handleShare() {
 }
 
 async function handleLogout() {
+  uploadController?.abort();
+  downloadController?.abort();
+  clearBufferedDownload();
   manualClose.value = true;
   clearReconnectTimer();
   socket.value?.close();
@@ -662,7 +719,7 @@ async function handleLogout() {
   overflow: hidden;
 }
 
-.initialization-error,
+.message-error,
 .inputAddon .upload-error {
   color: #b00020;
   white-space: normal;

@@ -1,7 +1,7 @@
 # Browser tests (Playwright)
 
 Chromium drives Vue through TLS/H2 to aiohttp and private Redis. WebKit also runs
-startup cases. `files.spec.js` covers file UI;
+startup and mobile-buffering cases. `files.spec.js` covers file UI;
 `encryption.spec.js` covers browser/storage/streaming integration.
 Format, boundary and tamper matrices belong in [crypto.test.js](../crypto.test.js).
 See the [encryption guide](../../../docs/file-encryption.md) for protocol details.
@@ -61,6 +61,8 @@ for offload tests; the browser launcher always sets `0`. DEV/PROD are unaffected
 - Automated downloads substitute the native picker with an OPFS handle, but
   use real disk-backed `FileSystemWritableFileStream` writes. They test bytes and
   failure/cancellation safety, not the native picker dialog or drag-and-drop UI.
+- Mobile cases use actual Blob uploads and clicked download links in desktop
+  WebKit, not an actual iPhone or its photo library/save UI.
 - The Node proxy exercises aiohttp downloads, not NGINX X-Accel. The backend
   suite has an optional native NGINX test, skipped when NGINX is unavailable.
 - Buffer/backpressure checks measure the stream pipeline, not whole-browser RSS.
