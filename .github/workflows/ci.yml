@@ -55,7 +55,7 @@ jobs:
         run: npm ci
       - name: Install Playwright browser
         working-directory: client
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium webkit
       - name: Run E2E suite (builds client, then runs Playwright)
         working-directory: client
         run: npm run test:crypto && npm run test:e2e

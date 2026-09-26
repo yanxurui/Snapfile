@@ -24,6 +24,10 @@ Share links put the same passcode in `#identity=...`, never in a query.
 Local storage retains the passcode until logout. Authentication requests send
 only the derived token.
 
+The login form loads before the crypto module, which is imported on Create/Open
+or fragment login. Hashed JS/CSS assets have gzip and immutable caching in the
+NGINX config; HTML revalidates so new releases do not reuse stale entrypoints.
+
 ## Chat envelope and history
 
 Chat uses the pinned libsodium XChaCha20-Poly1305 AEAD, independently of file

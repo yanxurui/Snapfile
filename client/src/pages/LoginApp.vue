@@ -13,7 +13,7 @@
           v-model="passcode"
           required
         />
-        <button type="submit" class="primary" :disabled="submitting">
+        <button type="submit" class="primary" :disabled="submitting || creating">
           {{ submitting ? 'Opening…' : 'Open Your Folder' }}
         </button>
       </form>
@@ -21,19 +21,19 @@
       <p class="divider">Or</p>
 
       <div class="actions">
-        <button type="button" @click="createFolder" :disabled="creating">
+        <button type="button" @click="createFolder" :disabled="creating || submitting">
           {{ creating ? 'Creating…' : 'Create A New Folder' }}
         </button>
       </div>
 
-      <p v-if="error" class="error">{{ error }}</p>
+      <p v-if="initializingCrypto" role="status">Preparing encryption...</p>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
     </div>
   </div>
 </template>
 
 <script setup>
 import { onMounted, ref } from 'vue';
-import { credentials, randomPasscode } from '@/crypto.js';
 
 // ---------------------------------------------------------------------------
 // Constants & Configuration
@@ -48,6 +48,7 @@ const formHeaders = {
 const passcode = ref('');
 const submitting = ref(false);
 const creating = ref(false);
+const initializingCrypto = ref(false);
 const error = ref('');
 // ---------------------------------------------------------------------------
 // API Functions
@@ -79,11 +80,24 @@ async function signup(identity) {
 // ---------------------------------------------------------------------------
 // Form Handlers
 // ---------------------------------------------------------------------------
+async function loadCrypto() {
+  initializingCrypto.value = true;
+  try {
+    return await import('@/crypto.js');
+  } catch (error) {
+    throw new Error('Unable to load encryption. Check your connection and reload to try again.', { cause: error });
+  } finally {
+    initializingCrypto.value = false;
+  }
+}
+
 async function handleLoginWithPasscode(raw) {
+  if (submitting.value || creating.value) return;
   submitting.value = true;
   error.value = '';
   
   try {
+    const { credentials } = await loadCrypto();
     const normalized = raw.trim().toLowerCase();
     await login((await credentials(normalized)).auth);
     localStorage.setItem('identity', normalized);
@@ -104,27 +118,30 @@ async function handleLogin() {
 }
 
 async function createFolder() {
+  if (submitting.value || creating.value) return;
   creating.value = true;
   error.value = '';
-  
-  let attempts = 5;
-  while (attempts > 0) {
-    try {
-      const candidate = await randomPasscode();
-      await signup((await credentials(candidate)).auth);
-      localStorage.setItem('identity', candidate);
-      window.location.href = '/';
-      return;
-    } catch (err) {
-      console.warn('Signup failed', err);
-      attempts -= 1;
-      if (attempts === 0) {
-        error.value = err?.message || 'Failed to create folder';
+
+  try {
+    const { credentials, randomPasscode } = await loadCrypto();
+    for (let attempts = 5; attempts > 0; attempts -= 1) {
+      try {
+        const candidate = await randomPasscode();
+        await signup((await credentials(candidate)).auth);
+        localStorage.setItem('identity', candidate);
+        window.location.href = '/';
+        return;
+      } catch (err) {
+        console.warn('Signup failed', err);
+        if (attempts === 1) throw err;
       }
     }
+  } catch (err) {
+    console.error(err);
+    error.value = err?.message || 'Failed to prepare encryption or create folder';
+  } finally {
+    creating.value = false;
   }
-  
-  creating.value = false;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,8 @@
 # Browser tests (Playwright)
 
-Chromium drives Vue through TLS/H2 to aiohttp and private Redis. `files.spec.js`
-covers file UI; `encryption.spec.js` covers browser/storage/streaming integration.
+Chromium drives Vue through TLS/H2 to aiohttp and private Redis. WebKit also runs
+startup cases. `files.spec.js` covers file UI;
+`encryption.spec.js` covers browser/storage/streaming integration.
 Format, boundary and tamper matrices belong in [crypto.test.js](../crypto.test.js).
 See the [encryption guide](../../../docs/file-encryption.md) for protocol details.
 
@@ -11,7 +12,7 @@ Complete the [project setup](../../../README.md#install--run) first. On macOS/Li
 ensure `redis-server`, `redis-cli` and OpenSSL are on `PATH`. From `client/`:
 
 ```sh
-npx playwright install chromium       # one-time browser installation
+npx playwright install chromium webkit # one-time browser installation
 npm run test:e2e                      # builds current sources, then runs headless
 npm run test:e2e:headed                # same suite in a visible browser
 npm run test:e2e:ui                    # interactive Playwright UI
