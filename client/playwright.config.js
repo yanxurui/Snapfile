@@ -27,6 +27,7 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'webkit', testMatch: /startup\.spec\.js$/, use: { ...devices['Desktop Safari'] } },
   ],
   // Boots an isolated Redis + the snapfile backend serving the freshly built
   // client. `npm run test:e2e` builds the client first (see package.json).

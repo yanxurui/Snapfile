@@ -8,6 +8,9 @@
   >
     <div id="top">
       <StatusBar v-if="statusInfo" :info="statusInfo" :visible="!!statusInfo" />
+      <p v-else :role="initializationError ? 'alert' : 'status'" :class="{ 'initialization-error': initializationError }">
+        {{ initializationError || 'Opening encrypted folder...' }}
+      </p>
       <DropdownMenu v-model:open="menuOpen" @share="handleShare" @logout="handleLogout" />
     </div>
 
@@ -203,6 +206,7 @@ let uploadController;
 let downloadController;
 const downloading = ref(false);
 const downloadStatus = ref('');
+const initializationError = ref('');
 
 const toast = reactive({ visible: false, message: '' });
 const toastTimer = ref(null);
@@ -236,7 +240,8 @@ onMounted(async () => {
     chatKey = keys.chatKey;
     initSocket();
   } catch (error) {
-    showToast(error.message);
+    console.error(error);
+    initializationError.value = `Unable to open encrypted folder: ${error.message}`;
   }
 });
 
@@ -657,6 +662,7 @@ async function handleLogout() {
   overflow: hidden;
 }
 
+.initialization-error,
 .inputAddon .upload-error {
   color: #b00020;
   white-space: normal;
