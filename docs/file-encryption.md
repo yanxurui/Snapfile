@@ -126,8 +126,8 @@ percentage is not a claim about server-received bytes.
 Upload errors are shown in red with their stage (browser support, preparation,
 quota admission or streaming). Server rejections retain their specific message;
 a quota or disk error does not imply a transport problem. Browser guidance is
-shown only when streaming APIs are missing or a secure context is unavailable,
-and HTTP2/HTTP3 guidance only when HTTP1 is observed. Generic fetch failures do
+shown only for missing required capabilities or oversized buffered transfers.
+Generic fetch failures do
 not identify an HTTP version. Failed cleanup is reported separately without
 replacing the original upload error. Retrying clears the error state, and normal
 progress, success and cancellation are not styled as errors.
@@ -137,12 +137,33 @@ network await, then writes authenticated records to `createWritable()`. Each
 write is awaited before reading another record. A BYOB network reader limits each
 read buffer to 64 KiB. Authentication errors and user
 cancellation abort the writable, preserving an existing destination file rather
-than committing partial plaintext. There is no fallback that accumulates a Blob.
+than committing partial plaintext.
 
 Pipeline buffering is independent of total file length: a fixed-size plaintext
 slice, framed ciphertext record, bounded parser record, and browser/network
 buffers. The tests instrument record sizes, read-ahead and stalled-destination
 behavior; they do not assert a bound on whole-browser RSS.
+
+### Small-file browser fallback
+
+When request streaming is unavailable or HTTP/1 is observed, files strictly
+smaller than **100,000,000 bytes (100 MB)** are encrypted slice-by-slice into a
+ciphertext Blob, then sent by normal PUT without `duplex`. Buffering completes
+before quota admission, so it does not consume the reservation's 60-second
+lifetime. Files are still sequential; desktop H2/H3 uploads remain streamed.
+
+Without `showSaveFilePicker`, the authenticated metadata size is checked against
+the same limit before fetching. The existing parser validates every record,
+FINAL and EOF into a temporary accumulator; only then does **Save file** expose
+a plaintext Blob through a fresh user-clicked download link. The filename stays
+client-side. Corruption or cancellation discards the accumulator. URLs are
+revoked on discard, replacement, logout or unmount, or 60 seconds after Save.
+The browser controls the native download/save experience.
+
+The cap limits each buffered file, **not total browser memory**: ciphertext
+overhead, Blob copies and network/browser buffers need additional memory.
+Upload buffering never accumulates the whole plaintext source. These paths use
+the identical encrypted format and backend API; they do not weaken authentication.
 
 ## Server storage and quota
 
@@ -203,9 +224,10 @@ test proxies do not implement X-Accel-Redirect and must leave it disabled.
 
 ## Transport and trust limits
 
-Current desktop Chromium/Edge, a secure context, browser-facing HTTP/2 or HTTP/3,
-and File System Access support are required. aiohttp remains HTTP/1 behind the
-TLS/H2 proxy. nginx must disable request buffering for the streaming upload
+All transfers require a secure context, Web Crypto and Streams support.
+Files at or above 100 MB additionally need desktop Chromium/Edge request
+streaming over HTTP/2 or HTTP/3 for uploads, and File System Access for downloads.
+aiohttp remains HTTP/1 behind the TLS/H2 proxy. nginx must disable request buffering for the streaming upload
 routes. Self-signed certificate acceptance in the isolated test context does not
 change the negotiated HTTP version or bypass Chromium's upload-stream restriction.
 

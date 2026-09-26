@@ -228,13 +228,22 @@ test('32 MiB completes a bounded upload and authenticated disk-backed download',
   console.log(`Completed 32 MiB exact-byte disk round trip: ${JSON.stringify(result)}`);
 });
 
-test('HTTP1-only localhost fails visibly without falling back to a buffered upload', async ({ page }) => {
+test('HTTP1 uses encrypted buffering for small files and rejects oversized files before admission', async ({ page }) => {
   await page.goto(`http://127.0.0.1:${process.env.E2E_PORT || '8091'}/login.html`);
   await page.getByRole('button', { name: 'Create A New Folder' }).click();
   await waitForReady(page);
-  await uploadFile(page, 'http1.bin', 'should not upload');
-  await expect(page.locator('.percent')).toContainText('This connection uses HTTP/1');
-  await expect(page.locator('.percent')).toContainText('HTTP/2 or HTTP/3');
+  await uploadFile(page, 'http1.bin', 'encrypted upload over HTTP1');
+  await expect(messageRow(page, 'http1.bin')).toBeVisible();
+  await page.evaluate(() => {
+    const file = new File(['tiny'], 'large-http1.bin');
+    Object.defineProperty(file, 'size', { value: 100_000_000 });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    const input = document.querySelector('input[type=file]');
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change'));
+  });
+  await expect(page.locator('.percent')).toContainText('smaller than 100 MB');
   await expect(page.locator('.percent')).toHaveClass(/upload-error/);
-  await expect(messageRow(page, 'http1.bin')).toHaveCount(0);
+  await expect(messageRow(page, 'large-http1.bin')).toHaveCount(0);
 });
